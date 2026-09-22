@@ -5,7 +5,7 @@
 //! emits `DomainEvent`s and a thin mapping layer turns them into `protocol::ServerEvent`
 //! for the client. That keeps the gameplay code from naming `ServerMessage` /
 //! `ServerEvent` at every emit site, so the wire protocol can change without touching the
-//! rules, and the same fact can later feed telemetry / replay / tests (see Plan.md §3).
+//! rules, and the same fact can later feed telemetry / replay / tests.
 //!
 //! `event_id` and `server_tick` are NOT part of a `DomainEvent` — they are transport
 //! bookkeeping stamped by the Room when it emits (the gap-free id counter and the current

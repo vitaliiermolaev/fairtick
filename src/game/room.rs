@@ -167,7 +167,7 @@ pub struct VisualOverlapProbeInput {
 /// Join/Leave/RequestFullState are still served synchronously under the lock (they return
 /// a value to the caller), so they are not part of this enum yet — promoting them would
 /// mean the full actor model (a dedicated room task + oneshot replies), a deliberate
-/// later step (see Plan.md §2).
+/// later step.
 #[derive(Debug)]
 pub enum RoomCommand {
     PlayerInput(PlayerInput),

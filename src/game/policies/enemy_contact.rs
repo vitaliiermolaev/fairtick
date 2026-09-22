@@ -1,7 +1,6 @@
 //! EnemyContactPolicy — does an enemy eat a player this tick?
 //!
-//! This is the most fairness-sensitive rule in the game (see the
-//! `deaths-are-presentation-skew` note): a render-skewed enemy is drawn behind its true
+//! This is the most fairness-sensitive rule in the game: a render-skewed enemy is drawn behind its true
 //! position, so a naive "centres within radius → die" kills from across the screen. The
 //! rule is therefore *victim-favored*: the kill radius is shrunk by `VICTIM_GRACE_PX`,
 //! and the contact must persist for `CONTACT_TICKS_REQUIRED` consecutive ticks against
@@ -17,7 +16,7 @@ use crate::game::timeline::ServerTick;
 /// Victim-favored kill-radius shrink (px). HARDCODED (not config) to keep `config_hash`
 /// stable — no StreamingAssets re-sync.
 ///
-/// Tuned 2026-06-03 from device telemetry (see the `match-telemetry` note): deaths
+/// Tuned 2026-06-03 from device match telemetry: deaths
 /// landed at server_dist 10–13px while the player saw the enemy 26–28px away
 /// (visual_minus_server up to ~17px), reading as "sudden death". With
 /// `collision_distance_px = 20` a grace of 9 puts the server kill at ~11px while the

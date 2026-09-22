@@ -1,14 +1,13 @@
 //! Typed timeline wrappers.
 //!
-//! Real-time fairness bugs are almost always *timeline* bugs (see the
-//! `deaths-are-presentation-skew` note): the same bare number can mean an authoritative
+//! Real-time fairness bugs are almost always *timeline* bugs: the same bare number can mean an authoritative
 //! server tick, a fractional client *render* tick, or wall-clock milliseconds, and
 //! silently mixing them is exactly how an enemy gets rendered ~delay ticks behind its
 //! true position and a player "dies unfairly". These newtypes make the compiler reject a
 //! `UnixMs` where a `ServerTick` is expected.
 //!
 //! Introduced *narrowly* — at policy boundaries — rather than swept across every
-//! signature (see Plan.md). Keep them lightweight: no surprise arithmetic, no Deref.
+//! signature. Keep them lightweight: no surprise arithmetic, no Deref.
 //!
 //! Serde derives are transparent (a newtype struct serializes as its inner value), so
 //! `ServerTick(7)` is just `7` on the wire / in a fixture.

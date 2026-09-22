@@ -1,7 +1,6 @@
 //! EatClaimValidationPolicy — is a player-initiated eat (an EatClaim) legitimate?
 //!
-//! Player-eats-X is *claim-based* (attacker-view, protocol v3 — see the `eat-claim-system`
-//! note): the client says "at my render tick I saw my mouth overlap this target", and the
+//! Player-eats-X is *claim-based* (attacker-view, protocol v3): the client says "at my render tick I saw my mouth overlap this target", and the
 //! server re-validates that against the past it recorded (the contact-history ring). The
 //! server no longer eats on its own collision.
 //!
