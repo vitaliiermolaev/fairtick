@@ -1,0 +1,14 @@
+# Keep the build context tiny + reproducible. (Cargo.toml, Cargo.lock, src/,
+# gameplay_config.toml, maze.json are NOT ignored — they're needed.)
+target/
+.git/
+.github/
+logs/
+data/
+*.db
+.idea/
+.claude/
+Builds/
+*.md
+gdd.pdf
+.env

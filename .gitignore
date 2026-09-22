@@ -1,0 +1,38 @@
+# Build
+/target/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.claude/
+
+# Cargo
+.cargo/
+
+# Database
+*.db
+
+# Environment
+.env
+
+# Runtime logs / traces
+traces/
+raw_logs.md
+# Local cross-repo netcode scratch docs (not source of truth)
+diff.md
+pr.md
+local-diff.md
+# Match telemetry NDJSON (one file per server run)
+/logs/
+
+# local soak artifacts
+/metrics/
+
+# local dev sqlite sidecars (WAL mode dirties them on every run)
+*.db-shm
+*.db-wal
+
+# Ops dashboard secret (audit item 6) — real file lives on the droplet only
+ops.env

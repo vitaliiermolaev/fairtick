@@ -1,0 +1,17 @@
+# Formatting is a CI GATE (ci.yml: `cargo fmt --all -- --check`) — a misformatted file
+# fails the build, same discipline as the clippy/warnings gate. Run `cargo fmt` before
+# pushing.
+#
+# Tuned to the codebase's existing style so adopting the formatter was near-mechanical
+# (the alternative — rustfmt defaults — would have exploded the deliberate compact
+# single-line blocks into a 10x larger diff):
+#   max_width 110         — the code is written ~110 cols, not the default 100.
+#   use_small_heuristics  — keep short structs/calls/blocks on one line (the compact style).
+# Imports are sorted by rustfmt (the original gripe: a `use` out of alphabetical order
+# now fails CI). Grouping into std/external/crate blocks is a NIGHTLY rustfmt feature
+# (group_imports) and is intentionally left off so the gate runs on stable with no
+# nightly toolchain in CI.
+edition = "2021"
+max_width = 110
+use_small_heuristics = "Max"
+newline_style = "Unix"

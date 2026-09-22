@@ -1,0 +1,52 @@
+name: CI
+
+# Build gate: warnings are build failures. Every push and PR must compile clean, pass clippy
+# with ZERO warnings, and pass the test suite — a single warning fails CI and stays red until
+# it's fixed. Warnings-as-errors is enforced in two layers:
+#   * Cargo.toml `[lints]` denies rustc warnings + clippy lints for this crate (so a plain
+#     `cargo build` / the release Docker build also fails on a rustc warning), and
+#   * `-D warnings` here makes the clippy gate explicit and target-complete.
+# Clippy lints only fire under `cargo clippy` (not `cargo build`/Docker), so CI is where the
+# clippy half of the gate actually runs.
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable + clippy + rustfmt)
+        run: rustup toolchain install stable --component clippy,rustfmt --profile minimal --no-self-update
+
+      - name: Cache cargo + target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # Formatting gate (rustfmt.toml): a misformatted file — an unsorted import, wrong
+      # indentation — fails CI, same discipline as clippy. `cargo fmt` fixes it locally.
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      # Lib, bins AND tests must be clippy-clean. -D warnings is redundant with Cargo.toml's
+      # [lints] but explicit, and guarantees the gate even if the manifest lints are bypassed.
+      - name: Clippy (warnings = errors)
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked

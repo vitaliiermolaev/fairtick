@@ -1,0 +1,97 @@
+# Dev-server stack for the fairtick backend.
+# The GitHub Action ships the prebuilt `fairtick:latest` image (docker save | ssh
+# docker load) and runs `docker compose up -d` here — the server never builds.
+# Caddy terminates TLS on 443 and reverse-proxies wss://$FAIRTICK_DOMAIN/ws to
+# the backend over the internal compose network. The client connects over wss:// only —
+# there is no plaintext public port anymore (the old ws://<IP>:7777 endpoint is gone).
+services:
+  backend:
+    image: fairtick:latest
+    container_name: fairtick
+    restart: unless-stopped
+    # No public host port. The backend is reachable only on the compose network as
+    # `backend:8080`; Caddy (below) is the sole public entry point and proxies to it.
+    expose:
+      - "8080"
+    environment:
+      # Bind on the container's network so the Caddy container can reach it; the port is
+      # NOT published to the host, so this is not exposed to the public internet.
+      FAIRTICK_BIND_ADDR: "0.0.0.0:8080"
+      DATABASE_URL: "sqlite:/app/data/fairtick.db?mode=rwc"
+      # Set to "1" for the verbose per-snapshot ws trace in the NDJSON logs.
+      FAIRTICK_TELEMETRY_VERBOSE: "0"
+      # Measured capacity cap for THIS box (1 vCPU): feel-safe knee is ~170-180 CCU
+      # (docs/capacity-planning.md, 2026-06-11 ramp). Refusing conn #151 protects the
+      # 150 already playing; the code default (500) would accept load the box can only
+      # serve with degraded ticks. Raise after a resize + re-measured ramp.
+      FAIRTICK_MAX_CONNECTIONS: "150"
+      # Per-IP cap is DISABLED on the dev droplet (audit item 2): this box doubles as the
+      # load-test target, and every soak bot arrives from ONE external IP through Caddy —
+      # an 8-cap would block the 100-bot gate profile. A PROD contour must DROP this line
+      # so the code default (8 per IP) protects real players from a single-IP flood.
+      FAIRTICK_MAX_CONNECTIONS_PER_IP: "0"
+      # Real Sign in with Apple: identity tokens are verified against Apple's JWKS
+      # with the audience FAIRTICK_APPLE_AUDIENCE (your iOS bundle id), supplied by
+      # ops.env below — deploy-specific, so not in the repo. This is the DEV droplet:
+      # FAIRTICK_DEV=1 unlocks the test_token_* path (bot_runner soaks + pre-auth
+      # builds). A PROD contour MUST drop both FAIRTICK_DEV and ALLOW_TEST_TOKENS —
+      # the server refuses to boot with test tokens but no DEV flag (audit item 1).
+      FAIRTICK_DEV: "1"
+      FAIRTICK_AUTH_MODE: "apple"
+      FAIRTICK_ALLOW_TEST_TOKENS: "1"
+    # Deploy-specific values (FAIRTICK_APPLE_AUDIENCE) live in the droplet-only ops.env.
+    env_file:
+      - ./ops.env
+    volumes:
+      - ./data:/app/data      # persists fairtick.db across deploys
+      - ./logs:/app/logs       # telemetry NDJSON, readable on the host
+    # Resource backstops on the shared droplet so one runaway can't starve the box (honored by
+    # `docker compose up`, not swarm-only). cpus MUST be <= the host's CPU count — the dev
+    # droplet has 1 CPU, so this is capped at 1.0 (docker rejects a larger value outright,
+    # which would fail the deploy). RAM on the box is ~2 GB.
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 512
+    # Rotate the container's STDOUT log so it can't fill the disk. NOTE: this does NOT rotate
+    # the app's NDJSON in ./logs (those are per-run files written into the volume) — that
+    # retention is a separate droplet cron / app-side cap (deploy follow-up).
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    # The image defines a /readyz HEALTHCHECK; `docker compose up --wait` (deploy health gate)
+    # blocks until it reports healthy, and the workflow rolls back if it never does.
+
+  caddy:
+    image: caddy:2
+    container_name: fairtick-caddy
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"      # ACME HTTP-01 challenge + HTTP→HTTPS redirect
+      - "443:443"    # wss:// — TLS terminated here, proxied to backend:8080
+    # Ops-dashboard basic_auth bcrypt hash (audit item 6 — secret out of the repo) plus the
+    # public hostname and ACME email. The Caddyfile reads {$OPS_BASIC_AUTH_HASH},
+    # {$FAIRTICK_DOMAIN} and {$ACME_EMAIL}; the values live in ops.env on the
+    # droplet ONLY (gitignored, see ops.env.example). env_file passes it through
+    # literally — no docker-compose $-substitution to mangle the bcrypt $-segments.
+    env_file:
+      - ./ops.env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # issued certs — MUST persist across deploys (LE rate limits)
+      - caddy_config:/config
+    mem_limit: 256m
+    cpus: 1.0
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  caddy_data:
+  caddy_config:

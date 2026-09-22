@@ -1,0 +1,72 @@
+[package]
+name = "fairtick"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/vitaliiermolaev/fairtick"
+default-run = "fairtick"
+
+# Faster dev builds
+[profile.dev]
+incremental = true
+debug = 1  # Reduced debug info for faster builds
+
+[profile.dev.package."*"]
+opt-level = 0
+
+# Warnings are build failures, not advisories. Any rustc warning fails EVERY cargo build of
+# this crate (debug, `cargo run`/run_server.sh, `cargo test`, and the release Docker build), so
+# warnings can't accumulate unnoticed — you fix them or the build stays red. Clippy lints are
+# denied too (they fire under `cargo clippy`, which CI runs as a gate; see .github/workflows/ci.yml).
+# Scoped to this package — dependencies are unaffected.
+[lints.rust]
+warnings = "deny"
+
+[lints.clippy]
+all = "deny"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "fs", "io-util"] }
+futures-util = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+bincode = "2.0.1"
+serde_json = "1"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros"] }
+
+# Utilities
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2.0.17"
+tracing = "0.1"
+# env-filter: log verbosity is RUST_LOG-controllable (default info) instead of a hardcoded
+# compile-time cap — needed to raise e.g. rate-limit shed logs to debug on a live soak box.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.9.2"
+rand_chacha = "0.9"
+base64 = "0.22"
+sha2 = "0.10"
+toml = "0.8"
+
+# Sign in with Apple: RS256 identity-token verification against Apple's JWKS.
+jsonwebtoken = "9"
+# JWKS fetch only (rustls to match the rest of the tree; no default openssl).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# WebSocket
+axum = { version = "0.7", features = ["ws"] }
+# rustls-tls: bot_runner must speak wss:// to the REAL dev/prod edge (Caddy+LE), not just
+# plaintext ws:// to a local server — a soak that can't reach the TLS endpoint silently
+# tests a different transport than production clients use. webpki-roots = no system
+# OpenSSL dependency.
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# Explicit crypto provider for rustls: the dependency tree enables more than one provider
+# feature, so rustls can't auto-pick — bot_runner installs ring at startup.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+
+[dev-dependencies]
+tempfile = "3"

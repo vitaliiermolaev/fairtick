@@ -1,0 +1,132 @@
+# fairtick shared gameplay config.
+# Single source of truth: both server (Rust) and client (iOS) MUST read this file.
+# Any change here changes config_hash and forces a client bundle update.
+
+[map]
+width = 500.0
+height = 1000.0
+cell_size = 25.0
+grid_width = 20
+grid_height = 40
+
+[gameplay]
+base_speed = 100.0
+boosted_speed = 160.0
+initial_score = 10
+invincibility_duration_sec = 10.0
+turn_threshold_px = 4.0
+# Post-respawn invulnerability window (s). Fairness value mirrored by the client's respawn blink —
+# single source of truth here, forwarded in Welcome. (review #3)
+spawn_protection_sec = 3.0
+
+[collision]
+collision_distance_px = 20.0
+
+[safe_zone]
+center_x = 250.0
+center_y = 500.0
+radius_px = 80.0
+
+[portal]
+pickup_radius_px = 30.0
+respawn_interval_sec = 20.0
+
+[spawn]
+point_interval_sec = 10.0
+booster_interval_sec = 8.0
+
+[room]
+max_players = 10
+game_duration_sec = 40
+tick_rate = 60
+send_interval_ticks = 2
+full_sync_interval_ticks = 60
+
+[economy]
+winner_crystals = 20
+participant_crystals = 2
+
+[network]
+# Bumped to 4 with the claim-based death wire (new client→server EnemyDeathClaim message +
+# EnemyDeathClaimRejected): old clients/servers must not mix. (lead review v6)
+# Bumped to 5: GameWinner/PlayerReward renamed their id field player_id → user_id (a wire-shape
+# change — old clients reading `player_id` would get null). The config_hash already gates old
+# bundles out, but the explicit version bump is the honest contract signal + an independent gate.
+# Bumped to 6: SNAPSHOTS (GameState/GameStateDelta) moved to bincode BINARY frames (egress:
+# JSON deltas at 30/s were ~3.2KB each -> 78 Mbit/s at 100 conns). Old clients can't decode
+# binary snapshots; client+server ship together. Snapshot encoding changed to binary and
+# entity ids were shortened (still opaque strings) - same field values otherwise, same cadence.
+protocol_version = 6
+move_command_rate_limit_per_sec = 30
+reconnect_grace_sec = 25
+# Upper bound of the client's prediction-lead clamp (ComputeLeadTicks: budget = RTT/2 + jitter + 50ms,
+# capped here). SHARED truth: the server's death-claim fallback hold/future windows derive from this,
+# so backend and Unity can't drift on "how far ahead a client may honestly predict". (round-3 follow-up)
+max_client_prediction_lead_ticks = 36
+# Honest client Ping cadence (ms). Shared truth: the Unity client pings at this interval
+# (generated GameConstants.PingIntervalMs) and the server derives its ping rate limit from it
+# (1000/this x headroom in the websocket edge guard) - tune it here and BOTH sides move together.
+ping_interval_ms = 250
+
+[ai]
+# 0 = red PvE "botN" mobs OFF (rooms are players-only). Enemy gameplay/tests pin their
+# own count; the rest of [ai] keeps tuning the mobs wherever they are spawned.
+count = 0
+speed = 100.0
+min_start_score = 25
+max_start_score = 300
+
+# Filler bots: fake PLAYERS (not the red [ai] PvE mobs) that keep casual rooms feeling alive.
+# Server-only — the client never learns which players are fillers (no wire flag, ordinary
+# PlayerState). Rooms top up to target_visible_players; when humans join over target, ONE
+# filler exits after a 48..150-tick (0.8–2.5 s @ 60tps) delay, never the same tick.
+[filler]
+enabled = true
+target_visible_players = 8
+exit_delay_min_ticks = 48
+exit_delay_max_ticks = 150
+# Human-burst ceiling: past this total, overflow fillers leave on expedited short-delay
+# exits (humans always seat). Empty rooms (no humans, no resume holds) keep fillers warm
+# for the grace, then sweep them and deactivate.
+max_transient_visible_players = 10
+empty_room_grace_ticks = 180
+
+# Enemy-eats-player death fairness. Policy v6 = CLAIM-BASED: the victim's client reports the
+# death it SAW (EnemyDeathClaim) and the server rewinds to validate. At v6 normal death is
+# claim-based; the server-side check_enemy_collisions is observe-only BELOW the
+# sustained-missing-claim threshold (it logs enemy_death_server_fallback_candidate), but it WILL
+# kill after a lethal, visibly-confirmed contact persists past that threshold with no claim
+# arriving — the anti-cheat fallback (decision kill_now_claim_missing_sustained), so a client
+# can't go immortal vs bots by withholding claims. The v4/v5 visible-gate / projection
+# (reconstructed + projected within 18) survives ONLY on that fallback path. Versioned + folded
+# into config_hash so a rule change forces re-sync.
+[death_fairness]
+policy_version = 6
+player_render_radius_px = 9.0
+enemy_render_radius_px = 9.0
+visible_contact_grace_px = 0.0
+enemy_interp_delay_ticks = 8
+visible_gate_enabled = true
+
+# Claim VALIDATION tolerances shared by EatClaimPolicy (player eats X) and EnemyDeathClaimPolicy
+# (enemy eats player). Were duplicated as consts in both policy modules (and as 18f in the Unity
+# claim controllers) — now a single config source, folded into config_hash, with
+# visible_overlap_radius_px forwarded in Welcome as claim_visible_overlap_radius_px so client claim
+# CREATION uses the same number the server validates against. (architecture review #3 — config SOT)
+[claim_fairness]
+# CLAIM overlap radius the server validates eat AND death claims against. NOT presentation SOT —
+# this is not the rendered sprite size; it currently equals the ~18px the client draws, but the
+# rendered dot scale is a SEPARATE invariant. Change one without the other and the claim gate moves
+# while the picture doesn't. (review Blocker 3 / High)
+visible_overlap_radius_px = 18.0
+position_tolerance_px = 12.0       # reported vs reconstructed position agreement
+reconstruct_slack_px = 8.0         # interp/fractional-tick slack; reconstruct radius = 18 + 8 = 26
+# Max attacker_render_tick - target_render_tick (eat). Must admit prediction lead (cap 36)
+# + the TOP of the client's ADAPTIVE enemy interp delay band (18 — see RemoteEntity reseed
+# patch, lead 2026-06-11): an honest high-jitter claim renders the target up to 18 ticks
+# behind, so 36 + 18 = 54. The reconstruction/position-tolerance checks still validate.
+max_view_skew_ticks = 54.0
+max_process_delay_ticks = 18       # an eat claim later than this after its attacker tick is rejected
+history_ticks = 96                 # contact-history ring length (1.6s at 60Hz)
+enemy_respawn_eat_grace_ticks = 3  # a just-respawned bot can't be re-eaten for this many ticks
+visual_distance_tolerance_px = 1.0 # reported visual_distance vs positions' geometry (anti-forge)

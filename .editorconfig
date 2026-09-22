@@ -1,0 +1,24 @@
+# Editor baseline for the backend. rustfmt (rustfmt.toml) is the AUTHORITATIVE Rust
+# formatter and the CI gate; this just makes editors agree on the universals (whitespace,
+# EOL, final newline) for every file type, including the non-Rust ones rustfmt ignores.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.rs]
+max_line_length = 110
+
+[*.{toml,yml,yaml,json}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

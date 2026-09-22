@@ -1,0 +1,41 @@
+{
+	# Let's Encrypt expiry notices land here (ACME_EMAIL in ops.env). Caddy auto-renews
+	# regardless, so this is informational only.
+	email {$ACME_EMAIL}
+}
+
+# Dev contour. The public hostname comes from FAIRTICK_DOMAIN in ops.env (see
+# ops.env.example). Its A record must already resolve to this server (CloudFlare
+# "DNS only" / grey cloud) BEFORE the first deploy, or ACME cannot complete the
+# HTTP-01 challenge and no cert is issued.
+{$FAIRTICK_DOMAIN} {
+	# Operational probes are NOT for the public internet — /readyz exposes readiness +
+	# topology (room count) and /healthz is liveness. Block them at the edge so a leaked URL
+	# can't fingerprint the deploy. The container's own healthcheck / orchestration probes
+	# backend:8080 DIRECTLY on the compose network, bypassing Caddy, so this doesn't affect
+	# real liveness/readiness checks.
+	@ops path /healthz /readyz
+	respond @ops 404
+
+	# /pingz stays PUBLIC on purpose: bare 200 "ok" liveness with zero topology in the
+	# body — the target for external uptime checks (DO Uptime / etc).
+
+	# Ops dashboard (/ops + /ops/statusz): live players/rooms/tick view. Auth lives HERE
+	# at the edge (the backend does none) — one place, one credential. The bcrypt hash is
+	# NOT in the repo (audit item 6): it's read from the OPS_BASIC_AUTH_HASH env var,
+	# supplied by the gitignored ops.env on the droplet (see ops.env.example).
+	@dash path /ops /ops/*
+	basic_auth @dash {
+		admin {$OPS_BASIC_AUTH_HASH}
+	}
+
+	# Caddy provisions + auto-renews the TLS cert via Let's Encrypt (HTTP-01 on :80).
+	# reverse_proxy transparently forwards the WebSocket upgrade — no extra config needed.
+	# `backend` resolves on the compose network to the backend container's :8080.
+	#
+	# TODO (edge abuse controls, needs the `caddy-ratelimit` plugin in a custom Caddy build):
+	# add a per-IP connection/request rate limit + a basic shield here for the beta endpoint.
+	# Core Caddy has no rate_limit directive, so this is left as a deploy-time follow-up rather
+	# than non-functional config that would fail to start.
+	reverse_proxy backend:8080
+}

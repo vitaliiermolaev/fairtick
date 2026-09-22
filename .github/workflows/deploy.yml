@@ -1,0 +1,70 @@
+name: Deploy to dev server
+
+# MANUAL deploy of the backend to the dev droplet — runs ONLY when you click
+# "Run workflow" (Actions tab) and pick the branch to build from (main). There is no
+# auto-deploy on push/merge: you decide when to ship.
+# Build happens HERE (GitHub runner), not on the droplet: the runner builds the Docker
+# image, ships it over SSH, and runs `docker compose up -d`. No registry, no Rust build
+# on the (small) droplet.
+on:
+  workflow_dispatch: {}        # manual only — the "Run workflow" button
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false    # never interrupt a deploy mid-flight
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: fairtick
+      # Repo variable (Settings → Secrets and variables → Actions → Variables): the dev
+      # server's address stays out of the public source, and a restored droplet (new IP)
+      # needs no commit.
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: root
+      DEPLOY_PATH: /opt/fairtick
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Docker image
+        # Pin amd64 to always match the x86_64 dev droplet. Tag with the commit SHA (a real
+        # release id, kept on the droplet for rollback history) AND :latest (what compose runs).
+        # BUILD_ID = the SHA is baked into the image and logged at server start.
+        run: |
+          docker build --platform linux/amd64 \
+            --build-arg BUILD_ID="${{ github.sha }}" \
+            -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+
+      - name: Configure SSH
+        run: |
+          : "${DEPLOY_HOST:?set the DEPLOY_HOST repository variable}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Ship image + compose to server
+        run: |
+          SSH="ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes ${DEPLOY_USER}@${DEPLOY_HOST}"
+          $SSH "mkdir -p ${DEPLOY_PATH}/data ${DEPLOY_PATH}/logs"
+          # Snapshot the CURRENTLY-deployed compose + Caddyfile as .prev BEFORE we overwrite them,
+          # so remote_deploy.sh can roll BOTH the image AND the stack definition back on a failed
+          # health gate (a bad Caddyfile/compose isn't fixed by an image rollback alone). (Blocker 5)
+          $SSH "cd ${DEPLOY_PATH} && { [ -f docker-compose.yml ] && cp -f docker-compose.yml docker-compose.yml.prev || true; [ -f Caddyfile ] && cp -f Caddyfile Caddyfile.prev || true; }"
+          scp -i ~/.ssh/id_ed25519 docker-compose.yml "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/docker-compose.yml"
+          # Caddy's reverse-proxy + TLS config travels with the compose file.
+          scp -i ~/.ssh/id_ed25519 Caddyfile "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/Caddyfile"
+          # The health-gate + rollback logic runs on the droplet (committed, reviewable).
+          scp -i ~/.ssh/id_ed25519 scripts/remote_deploy.sh "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/remote_deploy.sh"
+          # Transfer the prebuilt image over SSH (gzipped) — no registry. Ship BOTH tags; they
+          # share layers, so the SHA tag is nearly free and gives the droplet a named version.
+          docker save "$IMAGE:${{ github.sha }}" "$IMAGE:latest" | gzip | $SSH "gunzip | docker load"
+
+      - name: Deploy with health gate + automatic rollback
+        # remote_deploy.sh: backup DB → record current image → `compose up --wait` (waits for
+        # the /readyz healthcheck) → roll back to the previous image if the new one is unhealthy.
+        # Non-zero exit (rollback happened) fails the workflow so the deploy is visibly red.
+        run: |
+          SSH="ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes ${DEPLOY_USER}@${DEPLOY_HOST}"
+          $SSH "bash ${DEPLOY_PATH}/remote_deploy.sh"

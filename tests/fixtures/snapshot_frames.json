@@ -1,0 +1,114 @@
+{
+  "delta": {
+    "GameStateDelta": {
+      "enemies": [
+        {
+          "direction": "Down",
+          "generation": 4,
+          "id": "e_00112233",
+          "position": {
+            "x": 65.5,
+            "y": 64.0
+          },
+          "speed": 100.0
+        }
+      ],
+      "last_event_id": 70000,
+      "last_processed_input_seq": 43,
+      "players": [
+        {
+          "direction": "Right",
+          "id": "p_0a1b2c3d",
+          "position": {
+            "x": 124.75,
+            "y": -0.25
+          },
+          "score": 252,
+          "speed": 100.0
+        }
+      ],
+      "server_time_ms": 1781000000456,
+      "snapshot_seq": 617,
+      "tick": 1234,
+      "time_remaining": 36
+    }
+  },
+  "keyframe": {
+    "GameState": {
+      "boosters": [
+        {
+          "booster_type": "Mushroom",
+          "id": "boost-1",
+          "position": {
+            "x": 32.0,
+            "y": 96.0
+          }
+        }
+      ],
+      "enemies": [
+        {
+          "direction": "Down",
+          "generation": 4,
+          "id": "e_00112233",
+          "nickname": "bot1",
+          "position": {
+            "x": 64.0,
+            "y": 64.0
+          },
+          "score": 300,
+          "speed": 100.0
+        }
+      ],
+      "full_state_request_id": 9001,
+      "last_event_id": null,
+      "last_processed_input_seq": 42,
+      "players": [
+        {
+          "direction": "Up",
+          "id": "p_0a1b2c3d",
+          "invincibility_remaining": 1.5,
+          "is_invincible": true,
+          "nickname": "alice",
+          "position": {
+            "x": 123.5,
+            "y": -0.25
+          },
+          "score": 251,
+          "speed": 100.0
+        },
+        {
+          "direction": "Left",
+          "id": "p_ffeeddcc",
+          "invincibility_remaining": 0.0,
+          "is_invincible": false,
+          "nickname": "bob",
+          "position": {
+            "x": 0.0,
+            "y": 999.75
+          },
+          "score": 7,
+          "speed": 130.0
+        }
+      ],
+      "points": [
+        {
+          "id": "pt_0001",
+          "position": {
+            "x": 16.0,
+            "y": 48.5
+          }
+        }
+      ],
+      "portal": {
+        "position": {
+          "x": 250.0,
+          "y": 500.0
+        }
+      },
+      "server_time_ms": 1781000000123,
+      "snapshot_seq": 0,
+      "tick": 1200,
+      "time_remaining": 37
+    }
+  }
+}

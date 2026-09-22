@@ -1,0 +1,13 @@
+# fairtick ops cron — install ONCE on the droplet:  crontab scripts/ops.crontab
+# (adjust /opt/fairtick to the actual deploy dir — where ./data and ./logs live).
+#
+# Telemetry log rotation/retention is handled IN-APP (FAIRTICK_LOG_MAX_MB /
+# FAIRTICK_LOG_RETAIN), so no logrotate entry is needed. These cover the DB:
+#
+#   - hourly  crash-consistent SQLite backup (VACUUM INTO) + retention + disk guard
+#   - weekly  restore drill (prove the newest snapshot is actually restorable)
+#
+# Output goes to syslog (tag fairtick-*) so journald/logwatch can alert on failures.
+
+0 * * * *   cd /opt/fairtick && scripts/backup_db.sh   2>&1 | logger -t fairtick-backup
+17 4 * * 0  cd /opt/fairtick && scripts/restore_check.sh 2>&1 | logger -t fairtick-restore-check

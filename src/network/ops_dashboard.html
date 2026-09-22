@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#15161c">
+<title>fairtick ops</title>
+<style>
+  body { background:#15161c; color:#dfe3ee; font:14px/1.45 -apple-system, "Segoe UI", sans-serif; margin:0; padding:14px; }
+  h1 { font-size:16px; margin:0 0 12px; color:#9aa3bd; font-weight:600; }
+  /* Cards fill the viewport as an even grid: 2-up on phones, 3-up on desktop. */
+  .cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px; max-width:760px; }
+  .card { background:#1e2029; border:1px solid #2c2f3d; border-radius:8px; padding:10px 12px; }
+  .card .v { font-size:22px; font-weight:700; white-space:nowrap; }
+  .card .l { font-size:11px; color:#8a92ab; text-transform:uppercase; letter-spacing:.04em; }
+  .ok { color:#7fdc8e; } .warn { color:#f0c060; } .bad { color:#f07a70; }
+  /* The table never clips off-screen: compact headers + horizontal scroll fallback. */
+  .tablewrap { overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:760px; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:5px 8px; border-bottom:1px solid #2c2f3d; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  th { color:#8a92ab; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .muted { color:#6b7287; }
+  #err { color:#f07a70; margin-top:10px; display:none; }
+  footer { margin-top:14px; color:#6b7287; font-size:12px; }
+  @media (max-width: 420px) {
+    body { padding:10px; }
+    .card .v { font-size:19px; }
+    th, td { padding:4px 6px; font-size:13px; }
+  }
+</style>
+</head>
+<body>
+<h1>fairtick — live status</h1>
+<div class="cards">
+  <div class="card"><div class="v" id="humans">–</div><div class="l">players online</div></div>
+  <div class="card"><div class="v" id="fillers">–</div><div class="l">fillers</div></div>
+  <div class="card"><div class="v" id="conns">–</div><div class="l">conns / cap</div></div>
+  <div class="card"><div class="v" id="rooms">–</div><div class="l">rooms</div></div>
+  <div class="card"><div class="v" id="p95">–</div><div class="l">tick p95 / p99 ms</div></div>
+  <div class="card"><div class="v" id="holds">–</div><div class="l">resume holds</div></div>
+</div>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>room</th><th>hum</th><th>fill</th><th>res</th><th>total</th><th>left</th><th>state</th></tr></thead>
+  <tbody id="roomsBody"><tr><td colspan="7" class="muted">loading…</td></tr></tbody>
+</table>
+</div>
+<div id="err"></div>
+<footer id="meta"></footer>
+<script>
+const P95_WARN = 10, P99_BAD = 16; // mirrors docs/perf-baseline.md floors
+function cls(el, c) { el.className = "v " + c; }
+async function poll() {
+  try {
+    // Absolute path: the page is reachable as BOTH /ops and /ops/ — a relative
+    // "statusz" from /ops (no trailing slash) resolves to /statusz and 404s.
+    const r = await fetch("/ops/statusz", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const s = await r.json();
+    document.getElementById("err").style.display = "none";
+    const h = document.getElementById("humans"); h.textContent = s.players.humans; cls(h, "ok");
+    document.getElementById("fillers").textContent = s.players.fillers;
+    const c = document.getElementById("conns");
+    c.textContent = s.conns.active + " / " + s.conns.max;
+    cls(c, s.conns.active >= s.conns.max ? "bad" : s.conns.active >= s.conns.max * 0.9 ? "warn" : "");
+    document.getElementById("rooms").textContent = s.rooms_count;
+    const p = document.getElementById("p95");
+    p.textContent = s.tick.p95_ms.toFixed(1) + " / " + s.tick.p99_ms.toFixed(1);
+    cls(p, s.tick.p99_ms > P99_BAD ? "bad" : s.tick.p95_ms > P95_WARN ? "warn" : "ok");
+    document.getElementById("holds").textContent = s.resume_holds;
+    const body = document.getElementById("roomsBody");
+    body.innerHTML = s.rooms.length ? "" : '<tr><td colspan="7" class="muted">no rooms</td></tr>';
+    for (const r2 of s.rooms) {
+      const tr = document.createElement("tr");
+      const state = !r2.is_active ? "ended" : r2.joinable ? "open" : "closed";
+      tr.innerHTML = `<td>${r2.id_short}</td><td>${r2.humans}</td><td class="muted">${r2.fillers}</td>` +
+        `<td class="muted">${r2.reserved}</td><td>${r2.total}</td><td>${r2.remaining_sec}s</td><td>${state}</td>`;
+      body.appendChild(tr);
+    }
+    const up = Math.floor(s.uptime_sec / 3600) + "h " + Math.floor((s.uptime_sec % 3600) / 60) + "m";
+    document.getElementById("meta").textContent =
+      `build ${s.build.slice(0, 8)} · up ${up} · heartbeat ${s.tick.heartbeat_age_ms}ms · ` +
+      `matchmaking ${s.matchmaking_enabled ? "on" : "OFF"} · refreshed ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    const el = document.getElementById("err");
+    el.textContent = "fetch failed: " + e.message;
+    el.style.display = "block";
+  }
+}
+poll();
+setInterval(poll, 3000);
+</script>
+</body>
+</html>
