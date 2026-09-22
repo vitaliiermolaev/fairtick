@@ -31,17 +31,27 @@ mod regression_tests {
         let game_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("game");
         let mut violations = Vec::new();
 
-        // The scanner itself names the banned tokens in this file, so mod.rs
-        // is excluded from the scan. Real gameplay code lives in sibling files.
-        let entries = fs::read_dir(&game_dir).expect("game dir exists");
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("rs") {
-                continue;
+        // Walk src/game/** recursively: the fairness rules live in the policies/
+        // subdirectory, and a flat read_dir silently skipped them. The scanner itself
+        // names the banned tokens, so only THIS file (src/game/mod.rs) is excluded.
+        let scanner = game_dir.join("mod.rs");
+        let mut files = Vec::new();
+        let mut dirs = vec![game_dir.clone()];
+        while let Some(dir) = dirs.pop() {
+            for entry in fs::read_dir(&dir).expect("game dir exists").flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().and_then(|s| s.to_str()) == Some("rs") && path != scanner {
+                    files.push(path);
+                }
             }
-            if path.file_name().and_then(|s| s.to_str()) == Some("mod.rs") {
-                continue;
-            }
+        }
+        assert!(
+            files.iter().any(|f| f.starts_with(game_dir.join("policies"))),
+            "the scan must cover src/game/policies"
+        );
+        for path in files {
             let content = fs::read_to_string(&path).expect("readable");
             for (line_no, line) in content.lines().enumerate() {
                 let trimmed = line.trim_start();
