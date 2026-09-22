@@ -7592,11 +7592,17 @@ mod filler_tests {
         (room, human_id, reliable_rx)
     }
 
-    /// A walkable position outside every safe zone (eats are blocked inside them).
+    /// A walkable position outside every safe zone (eats are blocked inside them) and clear of
+    /// every player already in the room. Spawn positions are cell centers, and a frozen filler
+    /// can sit on exactly the cell drawn here; which filler lands where depends on the random
+    /// player ids, so without the clearance check a bystander filler occasionally became the
+    /// nearer (and first-eaten) victim and the scenario flaked (~1 run in 40).
     fn open_position(room: &mut Room) -> Position {
-        for _ in 0..64 {
+        const CLEARANCE_PX: f32 = 60.0;
+        for _ in 0..256 {
             let pos = room.map.get_random_spawn_position(&mut room.rng);
-            if !room.map.is_in_safe_zone(&pos) {
+            let clear = room.players.values().all(|p| Room::dist_px(&p.position, &pos) > CLEARANCE_PX);
+            if clear && !room.map.is_in_safe_zone(&pos) {
                 return pos;
             }
         }
@@ -7627,8 +7633,11 @@ mod filler_tests {
         let life_before = room.players[&human_id].life_id;
         let attacker_score_before = 500;
 
-        // Hold the overlap; positions are re-pinned each tick (speed 0 keeps them put).
+        // Hold the overlap; positions are re-pinned each tick (speed 0 keeps them put). Filler
+        // exits are cleared each tick for the same reason as the ledger scenario below: a
+        // scheduled exit must not remove the attacker mid-scenario.
         for _ in 0..(FILLER_EAT_SUSTAINED_TICKS as u64 + 4) {
+            room.scheduled_filler_exits.clear();
             overlap(&mut room, &attacker_id, &human_id, spot);
             room.update();
         }
