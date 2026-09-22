@@ -267,7 +267,7 @@ impl BotPersonality {
     /// Roll a personality from one of the manifesto archetypes. RoomRng-driven (replay-stable).
     pub fn roll(rng: &mut RoomRng) -> Self {
         // Archetype weights: collector-heavy mix reads as "people playing the game",
-        // not a pack hunting the human (manifesto: "бот должен чаще играть в игру").
+        // not a pack hunting the human (manifesto: "a bot should spend more time playing the game").
         let archetype = rng.range_usize(0..100);
         let jitter = |rng: &mut RoomRng, base: f32, spread: f32| {
             (base + rng.range_f32(-0.5..0.5) * spread).clamp(0.0, 1.0)

@@ -11,7 +11,7 @@ every filler→bot eat was (correctly) rejected — proving the SAFETY gate, but
 the path real beta players will live on. `bot_runner --client-ready` (added this
 run) walks the real client's readiness handshake: GameJoined → first snapshot →
 ClientWorldReady → clean pong → ClientClaimReady. Fillers can then legally eat
-the bots (lead review: "боты корректно едят готовых клиентов" was unproven).
+the bots (lead review: "bots correctly eat claim-ready clients" was unproven).
 
 ## Environment & profile
 

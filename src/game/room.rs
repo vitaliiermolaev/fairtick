@@ -203,8 +203,8 @@ const LATE_GRACE_TICKS: u64 = 60;
 const SERVER_FALLBACK_KILL_TICKS: u32 = 30;
 /// Resume admission shield (lead manifesto 2026-06-11, P0 #1): for this many ticks after a
 /// RESUME admission the player can neither die nor eat. The 07-12-37 run shows accepted
-/// kills 20 and 48 ticks after re-entry — technically clean claims, but UX-wise "вернулся
-/// и сразу хлопнуло". 90 ticks = 1.5s @60Hz. SYMMETRIC (no dying, no eating, no being
+/// kills 20 and 48 ticks after re-entry — technically clean claims, but UX-wise "came back
+/// and got killed instantly". 90 ticks = 1.5s @60Hz. SYMMETRIC (no dying, no eating, no being
 /// eaten by players) so the window can't be farmed as free invulnerability. Sent to the
 /// client in Welcome (`resume_shield_ticks`) so its claim gates mirror the same window
 /// from one source.
@@ -3268,7 +3268,7 @@ impl Room {
             return;
         }
         // Same admission gates as the death-claim path (lead 2026-06-11: "death/eat claims
-        // только после ClaimReady"), pre-dedup so the claim id isn't burned: claim-ready
+        // only after ClaimReady"), pre-dedup so the claim id isn't burned: claim-ready
         // declared, resume shield expired, live-room admission old enough.
         if !self.players.get(&attacker_id).map(|p| p.claim_ready).unwrap_or(false) {
             self.reject_eat_claim(&attacker_id, claim.claim_id, "claim_ready_not_seen");

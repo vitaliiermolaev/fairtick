@@ -176,8 +176,8 @@ impl Default for FillerConfig {
 }
 
 impl FillerConfig {
-    /// Restart-only ops kill switch (lead review: "выключить filler без пересборки
-    /// клиента — must-have"). Env beats toml WITHOUT touching the hashed toml bytes:
+    /// Restart-only ops kill switch (lead review: "turn fillers off without rebuilding
+    /// the client — must-have"). Env beats toml WITHOUT touching the hashed toml bytes:
     /// `config_hash` is computed over the FILE, and the client never reads `[filler]`,
     /// so flipping these can never strand a shipped build on a hash mismatch.
     ///
