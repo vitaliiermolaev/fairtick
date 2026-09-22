@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Your phone draws everything else where it was at least 133 ms ago, while the server judges collisions where things are now. How one open-source Rust server closes that gap, and where it still doesn&#x27;t.">
+<meta property="og:type" content="article">
+<meta property="og:title" content="The enemy on your screen is 133 milliseconds old">
+<meta property="og:description" content="Your phone draws everything else where it was at least 133 ms ago, while the server judges collisions where things are now. How one open-source Rust server closes that gap, and where it still doesn&#x27;t.">
+<meta property="og:url" content="https://vitaliiermolaev.github.io/fairtick/">
+<link rel="canonical" href="https://vitaliiermolaev.github.io/fairtick/">
+<title>The enemy on your screen is 133 milliseconds old</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400&display=swap">
+<style>
+  html, body { margin: 0; }
+  :root {
+    --paper: #f4f5f2;
+    --ink: #16181d;
+    --muted: #5a606a;
+    --rule: #d7dbd3;
+    --accent: #2447c5;
+    --enemy: #d4343c;
+    --enemy-fill: rgba(212, 52, 60, 0.18);
+    --you-fill: rgba(22, 24, 29, 0.07);
+    --code-bg: #e8eae5;
+    --figure-bg: #ffffff;
+    --sans: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #111317;
+      --ink: #e5e7ea;
+      --muted: #99a0aa;
+      --rule: #2a2e35;
+      --accent: #8ea6ff;
+      --enemy: #ff6b70;
+      --enemy-fill: rgba(255, 107, 112, 0.2);
+      --you-fill: rgba(229, 231, 234, 0.08);
+      --code-bg: #1b1e23;
+      --figure-bg: #16191e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #111317;
+    --ink: #e5e7ea;
+    --muted: #99a0aa;
+    --rule: #2a2e35;
+    --accent: #8ea6ff;
+    --enemy: #ff6b70;
+    --enemy-fill: rgba(255, 107, 112, 0.2);
+    --you-fill: rgba(229, 231, 234, 0.08);
+    --code-bg: #1b1e23;
+    --figure-bg: #16191e;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 19px;
+    line-height: 1.62;
+    padding-inline: 16px;
+    padding-block: 48px 72px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .article { max-width: 40rem; margin-inline: auto; }
+
+  .kicker {
+    font-family: var(--sans);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1rem;
+  }
+  h1 {
+    font-family: var(--sans);
+    font-stretch: 78%;
+    font-weight: 780;
+    font-size: clamp(2.3rem, 6.4vw, 3.6rem);
+    line-height: 1.02;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
+    margin: 0 0 1.1rem;
+  }
+  .dek {
+    font-family: var(--sans);
+    font-size: 1.2rem;
+    line-height: 1.45;
+    color: var(--muted);
+    text-wrap: pretty;
+    margin: 0 0 1.6rem;
+  }
+  .byline {
+    font-family: var(--sans);
+    font-size: 0.88rem;
+    color: var(--muted);
+    border-block: 1px solid var(--rule);
+    padding-block: 0.7rem;
+    margin: 0 0 2.2rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1.1rem;
+  }
+  .byline strong { color: var(--ink); font-weight: 650; }
+
+  p { margin: 0 0 1.15em; text-wrap: pretty; }
+  .lede::first-letter {
+    font-family: var(--sans);
+    font-stretch: 78%;
+    font-weight: 800;
+    float: left;
+    font-size: 3.6em;
+    line-height: 0.82;
+    padding: 0.08em 0.1em 0 0;
+  }
+  h2 {
+    font-family: var(--sans);
+    font-stretch: 88%;
+    font-weight: 720;
+    font-size: 1.5rem;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 2.6rem 0 0.9rem;
+  }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.8em;
+    background: var(--code-bg);
+    padding: 0.1em 0.32em;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    border-radius: 6px;
+    padding: 1rem 1.1rem;
+    overflow-x: auto;
+    margin: 0 0 1.4em;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; font-size: 0.78rem; }
+  pre .c { color: var(--muted); }
+
+  ul { margin: 0 0 1.2em; padding-left: 1.2em; }
+  li { margin-bottom: 0.45em; padding-left: 0.2em; }
+  li::marker { color: var(--muted); }
+
+  figure { margin: 2.2rem 0 2.4rem; }
+  .fig-wide { max-width: 50rem; margin-inline: auto; }
+  .fig-frame {
+    background: var(--figure-bg);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 1rem 0.5rem 0.6rem;
+    overflow-x: auto;
+  }
+  .fig-svg { display: block; width: 100%; min-width: 600px; height: auto; font-family: var(--sans); }
+  .fg-ink { fill: var(--ink); }
+  .fg-muted { fill: var(--muted); }
+  .fg-enemy { fill: var(--enemy); }
+  .fg-you { fill: var(--you-fill); stroke: var(--ink); }
+  .fg-enemy-dot { fill: var(--enemy-fill); stroke: var(--enemy); }
+  .fg-ghost { fill: none; stroke: var(--enemy); }
+  .fg-rule { stroke: var(--rule); }
+  .fg-stroke { stroke: var(--ink); fill: none; }
+  .fg-stroke-muted { stroke: var(--muted); fill: none; }
+  figcaption {
+    font-family: var(--sans);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--muted);
+    margin-top: 0.8rem;
+    max-width: 40rem;
+    margin-inline: auto;
+  }
+  figcaption b { color: var(--ink); font-weight: 700; }
+
+  .pull {
+    font-family: var(--sans);
+    font-stretch: 85%;
+    font-weight: 650;
+    font-size: 1.55rem;
+    line-height: 1.25;
+    text-wrap: balance;
+    border-top: 3px solid var(--ink);
+    padding-top: 0.9rem;
+    margin: 2.4rem 0;
+  }
+
+  .table-wrap { overflow-x: auto; margin: 0 0 1.4em; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--sans);
+    font-size: 0.92rem;
+    font-variant-numeric: tabular-nums;
+  }
+  th, td { text-align: left; padding: 0.55rem 0.7rem 0.55rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 0.74rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  td:last-child { font-weight: 600; }
+
+  .endmark { display: inline-block; width: 0.6em; height: 0.6em; background: var(--ink); margin-left: 0.3em; vertical-align: baseline; }
+  footer.meta {
+    font-family: var(--sans);
+    font-size: 0.88rem;
+    color: var(--muted);
+    border-top: 1px solid var(--rule);
+    margin-top: 2.6rem;
+    padding-top: 1rem;
+  }
+
+  @media (max-width: 520px) {
+    body { font-size: 17.5px; padding-block: 28px 56px; }
+    .dek { font-size: 1.08rem; }
+    h2 { font-size: 1.32rem; }
+    .pull { font-size: 1.3rem; }
+  }
+</style>
+
+</head>
+<body>
+<article class="article">
+  <header>
+    <p class="kicker">Open source &#183; Netcode</p>
+    <h1>The enemy on your screen is 133 milliseconds old</h1>
+    <p class="dek">Your phone draws everything else where it was at least 133 ms ago, while the server judges collisions where things are now. How one open-source Rust server closes that gap, and where it still doesn&#8217;t.</p>
+    <div class="byline"><span>By <strong>Vitalii Ermolaev</strong></span><span>September 2026</span><span>13 min read</span></div>
+  </header>
+
+  <p class="lede">You are a small dot in a maze, and a bigger dot is coming for you. On your phone there is a clear strip of floor between the two, a gap about two-thirds as wide as your own dot. You turn away. You die anyway.</p>
+
+  <p>Nobody cheated. The server did what most game servers do. At tick 5,112 it measured 17 pixels between you and the enemy, saw that this was inside its 20-pixel kill distance, and sent you a death event. Every number in that decision was correct. But the enemy on your screen was not the enemy at tick 5,112. It was the enemy at tick 5,104, drawn 8 ticks late on purpose so that it would move smoothly.</p>
+
+  <p>Every real-time multiplayer game has a gap like this between what the server knows and what the player sees. Shooters settled half of the problem two decades ago: when you fire, the server rewinds the world to what you saw and checks the hit there. Kills by contact rather than by a trigger pull (being caught, run over, eaten) are more often decided on server time, and players experience them as &#8220;that didn&#8217;t even touch me.&#8221;</p>
+
+  <p>I spent a good part of the past year on this in the backend of a small mobile arena game. The result is <a href="https://github.com/vitaliiermolaev/fairtick">fairtick</a>, an authoritative game server in Rust built around one rule: if a decision depends on what a player saw, the code has to name the timeline that player saw and use it. When one player eats another, the attacker&#8217;s client files a claim describing what it drew, and the server checks it against its own recorded history. When a server-controlled enemy catches a player, the victim&#8217;s client files the claim instead. Bots, which have no screen at all, are the exception I haven&#8217;t solved. The code is dual-licensed under MIT and Apache 2.0.</p>
+
+  <h2 id="two-clocks-one-kill">Two clocks, one kill</h2>
+
+  <p>A game client runs on two timelines at once. Your own dot is predicted: the client applies your input immediately and reconciles with the server afterward, so your dot lives slightly ahead of the authoritative state. Everything else is interpolated. The server sends snapshots 30 times a second, and to draw an enemy smoothly the client needs two of them to blend between, so it deliberately renders other entities in the past. In fairtick&#8217;s reference client, that delay is at least 8 ticks, or 133 ms at 60 ticks per second, and it grows to as much as 18 ticks on a jittery connection.</p>
+
+  <p>Enemies move at 100 pixels per second. (These are world pixels, the unit the server works in; your dot is 18 of them across.) Eight ticks of delay puts the enemy you see 13.3 px behind where the server has it, and two dots touch on screen when their centers are 18 px apart. So the server measures 17 px and kills, while your screen shows 30 px and a 12 px gap.</p>
+
+  <figure class="fig-wide">
+    <div class="fig-frame">
+<svg class="fig-svg" viewBox="0 0 820 372" role="img" aria-label="The same instant on two timelines. At tick 5,112 the server has the enemy 17 pixels from the player, inside a 20 pixel kill distance, so it kills. The player's screen draws the enemy from tick 5,104, 30 pixels away, so the two dots are still 12 pixels apart.">
+  <defs>
+    <marker id="ft-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="fg-ink"/>
+    </marker>
+  </defs>
+  <line x1="24" y1="196" x2="796" y2="196" class="fg-rule" stroke-width="1"/>
+
+  <text x="24" y="106" class="fg-ink" font-size="12" font-weight="700" letter-spacing="1.2">SERVER</text>
+  <text x="24" y="124" class="fg-muted" font-size="12">tick 5,112</text>
+  <text x="24" y="274" class="fg-ink" font-size="12" font-weight="700" letter-spacing="1.2">YOUR SCREEN</text>
+  <text x="24" y="292" class="fg-muted" font-size="12">enemy from tick 5,104</text>
+
+  <text x="300" y="64" class="fg-muted" font-size="12" text-anchor="middle">you</text>
+  <text x="372" y="64" class="fg-enemy" font-size="12" text-anchor="middle">enemy</text>
+  <circle cx="300" cy="112" r="36" class="fg-you" stroke-width="2"/>
+  <circle cx="368" cy="112" r="36" class="fg-enemy-dot" stroke-width="2"/>
+  <line x1="442" y1="112" x2="412" y2="112" class="fg-stroke" stroke-width="1.5" marker-end="url(#ft-arrow)"/>
+  <text x="450" y="116" class="fg-muted" font-size="12">100 px/s</text>
+  <line x1="300" y1="154" x2="300" y2="170" class="fg-stroke-muted" stroke-width="1"/>
+  <line x1="368" y1="154" x2="368" y2="170" class="fg-stroke-muted" stroke-width="1"/>
+  <line x1="300" y1="164" x2="368" y2="164" class="fg-stroke" stroke-width="1.25"/>
+  <text x="334" y="184" class="fg-ink" font-size="12" text-anchor="middle" font-weight="700">17 px</text>
+
+  <text x="590" y="108" class="fg-ink" font-size="13" font-weight="700">17 px &lt; 20 px kill distance</text>
+  <text x="590" y="127" class="fg-muted" font-size="12">server: contact, so it kills</text>
+
+  <text x="368" y="214" class="fg-enemy" font-size="12" text-anchor="middle">server position now</text>
+  <text x="300" y="232" class="fg-muted" font-size="12" text-anchor="middle">you</text>
+  <text x="414" y="232" class="fg-enemy" font-size="12">drawn 8 ticks late</text>
+  <circle cx="300" cy="280" r="36" class="fg-you" stroke-width="2"/>
+  <circle cx="368" cy="280" r="36" class="fg-ghost" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <circle cx="421" cy="280" r="36" class="fg-enemy-dot" stroke-width="2"/>
+  <line x1="421" y1="280" x2="372" y2="280" class="fg-stroke" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#ft-arrow)"/>
+  <line x1="336" y1="322" x2="336" y2="338" class="fg-stroke-muted" stroke-width="1"/>
+  <line x1="385" y1="322" x2="385" y2="338" class="fg-stroke-muted" stroke-width="1"/>
+  <line x1="336" y1="332" x2="385" y2="332" class="fg-stroke" stroke-width="1.25"/>
+  <text x="360" y="352" class="fg-ink" font-size="12" text-anchor="middle" font-weight="700">12 px gap</text>
+
+  <text x="590" y="258" class="fg-ink" font-size="13" font-weight="700">30 px apart</text>
+  <text x="590" y="277" class="fg-muted" font-size="12">dots touch at 18 px</text>
+  <text x="590" y="296" class="fg-muted" font-size="12">13.3 px = 8 ticks at 100 px/s</text>
+</svg>
+    </div>
+    <figcaption><b>Figure 1.</b> The same instant on two timelines. At tick 5,112 the server has the enemy 17 px from you, inside a 20 px kill distance. Your screen draws the enemy from tick 5,104, 13.3 px farther back, so on screen the two dots are still 12 px apart. Your own dot is held still here for simplicity.</figcaption>
+  </figure>
+
+  <p>This isn&#8217;t a thought experiment. Before fairtick changed its rules, device telemetry showed deaths landing when the server measured 10 to 13 px while the player&#8217;s screen showed the enemy 26 to 28 px away.</p>
+
+  <p>Interpolation is doing its job here; it is what keeps remote movement from stuttering. The mistake is deciding something the player has to see, a collision, on a timeline the player never saw.</p>
+
+  <h2 id="the-fixes-that-don-t-fix-it">The fixes that don&#8217;t fix it</h2>
+
+  <p>The first thing everyone reaches for is the radius. Shrink the kill distance by 13 px and the head-on case looks fair. That correction is right only for an enemy moving straight at you at full speed. An enemy approaching from the side, or one that has stopped, now has to visibly overlap you before it counts, and players notice that too. A radius is one number; the error is a vector that depends on speed, heading and delay. A version of the trick survives in fairtick: when no death claim arrives, the server&#8217;s fallback kills at 11 px, the 20 px distance minus 9 px of grace in the victim&#8217;s favor, and only after the reconstruction described below agrees.</p>
+
+  <p>The second fix is to trust the client and let the player&#8217;s device decide when it was touched. That works until someone patches the client so that it never is.</p>
+
+  <p>The third is the shooter approach, and it has a long pedigree. Yahn Bernier described server-side lag compensation at GDC in 2001, Valve&#8217;s Source engine has shipped it for years, and the Overwatch team talked at GDC 2017 about favoring the shooter. The server keeps a short history of positions and, when judging a hit, rewinds the world to what the shooter saw. Source doesn&#8217;t even have to guess how far back to go, because each command carries the client&#8217;s tick and its interpolation setting.</p>
+
+  <p>Collisions are harder, because the victim&#8217;s own dot is part of the picture, and the client predicts and smooths it in ways the server can&#8217;t reproduce exactly. I built server-side reconstruction twice anyway. Versions 4 and 5 of the death rule rebuilt the enemy the victim was looking at, projected the victim&#8217;s dot forward, and held the kill until both agreed there was contact. That was far better than the radius, but it was still a model of the screen rather than the screen. In one recorded match the server measured 3.3 px between a player and an enemy. The reconstruction put the enemy 13.7 px away on the player&#8217;s screen and the forward projection said 17.7 px, close enough to count as touching. The phone&#8217;s own log said it had drawn the enemy 23.6 px away, with no overlap at all.</p>
+
+  <p class="pull">If a decision depends on what a player saw, the code has to name the timeline that player saw and use it.</p>
+
+  <h2 id="ask-the-screen-that-saw-it">Ask the screen that saw it</h2>
+
+  <p>Version 6 stopped modeling the screen and started asking it. Every kill in fairtick is one of three kinds, and each is decided on a different timeline:</p>
+
+  <div class="table-wrap"><table>
+<thead><tr><th scope="col">Who kills you</th><th scope="col">Whose timeline decides</th></tr></thead>
+<tbody>
+<tr><td>Another player</td><td>The attacker&#8217;s screen, through an <code>EatClaim</code></td></tr>
+<tr><td>A server-controlled enemy</td><td>Your screen, through an <code>EnemyDeathClaim</code>, with a server fallback</td></tr>
+<tr><td>A bot posing as a player</td><td>Server time, with conservative rules</td></tr>
+</tbody>
+</table></div>
+
+  <p>An <code>EatClaim</code> is client-side hit detection with server verification, the same bargain shooters make when they favor the shooter. When your dot overlaps something it can eat, your client reports the render ticks at which it drew you and the target, the positions it drew, and the on-screen distance between them. An <code>EnemyDeathClaim</code> runs the other way: when a server-controlled enemy reaches you, your client reports your own death in the same terms, shows it immediately, and rolls it back if the server rejects the claim. Server-controlled enemies are a mode, and the maze arena in the repository ships with them switched off (<code>[ai] count = 0</code>), so a default room holds only humans and bots.</p>
+
+  <p>The server takes none of this on faith. It keeps a ring buffer of the last 96 ticks (1.6 seconds) recording where every entity was, and it rebuilds the claimed moment from its own history. A claim is accepted only if:</p>
+
+  <ul>
+<li>the reported positions agree with the reconstructed ones to within 12 px;</li>
+<li>the reconstructed distance is within 26 px, the 18 px at which dots touch plus 8 px of slack for interpolation between ticks;</li>
+<li>the two render ticks are no more than 54 ticks apart, which covers the client&#8217;s prediction lead plus the worst-case interpolation delay;</li>
+<li>the claim arrives within 18 ticks (300 ms) of the moment it describes;</li>
+<li>at that moment the target was alive, not spawn-protected or boosted, outside the safe zone, smaller than the attacker unless the attacker was boosted, and still the same life of that target (more on lives below).</li>
+</ul>
+
+  <p>Every rejection has a fixed reason string, such as <code>too_old_after_victim_tick</code>, that is logged and sent back to the client. The claim tolerances live in one config file whose SHA-256 hash is part of the connection handshake. That catches drift between honest builds, not cheating, since a patched client can send the right hash.</p>
+
+  <p>The tolerances have a price. Taken together, they let a patched client stretch its reach from 18 px to 26 px when it eats. That is the cost of accepting honest claims from phones whose rendering the server can only approximate. On the death side the risk runs the other way. Nobody forges their own death; the danger is a client that stays silent.</p>
+
+  <p>So the server keeps watching. Every tick it checks collisions itself, in observe-only mode, and if an enemy stays within 11 px for 30 straight ticks (half a second) while its reconstruction of the player&#8217;s screen also shows overlap, it kills without a claim and logs <code>enemy_death_claim_missing_sustained_kill</code>. That rules out immortality but not advantage: a client that never claims survives the brief, shallow contacts that kill an honest one.</p>
+
+  <h2 id="same-id-different-life">Same ID, different life</h2>
+
+  <p>Claims describe the past, and the past can name things that no longer exist. That caused the worst bugs in this design.</p>
+
+  <p>Enemies and players respawn under the same ID. A claim that arrives a few ticks late can describe an enemy that has since been eaten and reappeared somewhere else, and a careless server would validate the claim against the old position and remove the new enemy. So every entity carries a life counter (a generation for enemies, a life ID for players), every history frame records it, and a claim against life 3 cannot touch life 4.</p>
+
+  <p>The subtler case involves two claims about nearly the same moment. Say you eat an enemy at render tick 10. By the time your claim arrives, the server has already recorded frames 11 and 12 with that enemy alive, because until then it didn&#8217;t know. A death claim from another player at tick 11 could cite that frame and be killed by an enemy that was already dead. Sorting claims by render tick doesn&#8217;t help, because the two claims can arrive in different batches, several server ticks apart. What fixed it is a small causal ledger that remembers what each applied claim consumed, keyed by entity and life, and rejects any later claim whose premise an earlier one has already invalidated.</p>
+
+  <h2 id="making-the-compiler-care">Making the compiler care</h2>
+
+  <p>A rule like this survives only if you can&#8217;t break it by accident, and in a game server the accident is usually a bare number. A server tick, a fractional render tick and a Unix timestamp are all numbers, and a function that confuses them compiles fine.</p>
+
+  <p>In fairtick they are separate types, and every entry point into the fairness rules takes the typed version:</p>
+
+  <pre><code><span class="c">/// Authoritative server simulation tick. Monotonic, exactly one per `Room::update`.</span>
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ServerTick(pub u64);
+
+<span class="c">/// A *client* render tick &#8212; fractional, in Unity tick units. This is the timeline the</span>
+<span class="c">/// attacker actually saw: interpolated, `delay` ticks behind the server. Used to</span>
+<span class="c">/// reconstruct the attacker&#x27;s view when validating an EatClaim.</span>
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct RenderTick(pub f64);</code></pre>
+
+  <p>The wire still carries plain numbers, and the room wraps them at the boundary. There is no <code>Deref</code> and no arithmetic operator between the types; the few places where a server tick has to be ordered against a render tick go through a named conversion, <code>as_render_tick</code>, so they stand out in review. A test walks every file under <code>src/game</code> and fails if it finds <code>Instant::now</code>, <code>SystemTime::now</code> or <code>.elapsed()</code>. Telemetry can still read the clock, but every such line has to carry an <code>// allow-wall-clock:</code> comment saying why.</p>
+
+  <p>The rest of the architecture exists to keep the rules small enough to test. Each room sits behind one lock. Inputs and claims go into queues that only the tick drains, and joins and leaves take the same lock, so changes to a room happen one at a time. Most fairness decisions live in a <code>policies</code> module with no access to sockets, the database or the logger. Claim scheduling and the fallback still live in <code>room.rs</code>, the largest file in the project and the one I&#8217;d split next. Because the policies take plain inputs and return verdicts, <code>tests/policy_scenarios.rs</code> can replay 25 named situations, from a one-tick brush that must not kill to a stale claim after a respawn, and check both the verdict and the exact rejection reason.</p>
+
+  <h2 id="death-before-the-snapshot">Death before the snapshot</h2>
+
+  <p>The server sends two kinds of traffic: reliable gameplay events such as deaths and respawns, and a stream of position snapshots where only the latest matters. fairtick speaks WebSocket over TLS, so on the wire everything shares one TCP connection, and a lost packet holds up whatever is queued behind it. Inside the server, though, events and snapshots come from different code paths into different queues, and a snapshot that already shows a player respawned elsewhere can overtake the event saying the player died. On screen, you teleport first and die second.</p>
+
+  <p>An <code>OutboundSequencer</code> merges both queues into one stream per player and never hands a snapshot to the socket while a reliable event is waiting. Snapshots are latest-only by construction, so a slow client skips stale frames instead of queuing them. If a player&#8217;s reliable queue overflows, the server disconnects that player rather than drop an event, and the reconnect delivers a full state.</p>
+
+  <h2 id="what-it-costs">What it costs</h2>
+
+  <p>I measured the server on the cheapest machine I could justify: a DigitalOcean droplet with one vCPU and 2 GB of RAM, reached over the public internet through a TLS proxy. The load was 100 bots in ten 10-player rooms. The bots go through the same handshake as the real client and send input four times a second, and roughly a third of them dropped and resumed their sessions during each run. They don&#8217;t send eat or death claims, and server-controlled enemies were off, so these numbers cover simulation, history recording, snapshots and connections, not claim validation.</p>
+
+  <div class="table-wrap"><table>
+<thead><tr><th scope="col">Metric</th><th scope="col">Result</th></tr></thead>
+<tbody>
+<tr><td>Tick time, 99th percentile at peak</td><td>10&#8211;12 ms (budget: 16.67 ms)</td></tr>
+<tr><td>Ticks over budget</td><td>23 and 35 per run, of ~22,800 (0.10&#8211;0.15%)</td></tr>
+<tr><td>Outbound traffic per player</td><td>12&#8211;13 KB/s</td></tr>
+<tr><td>Host CPU, steady state</td><td>~45%</td></tr>
+<tr><td>Peak memory (RSS)</td><td>17 MB</td></tr>
+<tr><td>Errors / unplanned disconnects</td><td>0 / 0</td></tr>
+<tr><td>Two 5-minute runs</td><td>1.77 M snapshots delivered, ~1,400 bot-matches</td></tr>
+</tbody>
+</table></div>
+
+  <p>An earlier ramp test, with a lighter bot load, passed at 150 players and failed at 200, so the deployment caps the server at 150 connections. Snapshots are encoded with bincode as of protocol version 6; control messages are JSON.</p>
+
+  <h2 id="what-isn-t-solved">What isn&#8217;t solved</h2>
+
+  <p>Bots are the biggest hole. The server fills thin rooms with bots that look like players on the wire, and a bot has no screen, so it can&#8217;t file a claim. When a bot catches a human, the kill is decided on server time with conservative rules instead: the overlap has to hold for 6 consecutive ticks, the human&#8217;s client must have finished loading the world, and protection and cooldowns apply. None of that is a guarantee. A bot chasing you at full speed is still drawn 13 px behind where the server has it, which is the scene at the top of this article. The human can&#8217;t file a death claim against it either, because the client can&#8217;t tell a bot from a person by design, and between players it is the attacker who claims.</p>
+
+  <p>The claim tolerances come next. A patched client can eat from 26 px instead of 18, and one that never reports its own death survives contacts that would kill an honest player until the fallback fires.</p>
+
+  <p>Then determinism. Gameplay randomness goes through a seeded per-room RNG, but entity IDs are random UUIDs and a few decisions depend on ID order, so replays are not bit-exact yet. The same thing made two bot tests fail about once in 35 runs until I isolated them.</p>
+
+  <p>Finally, this is a server with a game inside it, not a library. The rules are general; the code around them belongs to one maze game with dots that eat each other. The Unity client it was built against is not public, but you don&#8217;t need it to run the server or the load generator.</p>
+
+  <h2 id="try-it">Try it</h2>
+
+  <pre><code>git clone https://github.com/vitaliiermolaev/fairtick
+cd fairtick
+cargo build --release --locked
+
+<span class="c"># terminal 1: the server in local dev mode (no real sign-in), bound to localhost</span>
+FAIRTICK_DEV=1 FAIRTICK_AUTH_MODE=insecure FAIRTICK_BIND_ADDR=127.0.0.1:8080 \
+  ./target/release/fairtick
+
+<span class="c"># terminal 2: 100 bots for two minutes; --strict exits non-zero on any error</span>
+./target/release/bot_runner --count 100 --duration 120 --strict</code></pre>
+
+  <p>While it runs, <code>http://127.0.0.1:8080/ops</code> shows live rooms and per-room tick times. The load run exercises the simulation and networking but not the claim rules; <code>cargo test</code> is where those run, starting with <code>tests/policy_scenarios.rs</code> and the policies in <code>src/game/policies</code>.</p>
+
+  <h2 id="why-it-s-open">Why it&#8217;s open</h2>
+
+  <p>I spent part of this year trying to sell this backend to studios as IP. It didn&#8217;t sell, and code like this does more good where people can read it. Much of it was written with an AI coding assistant working to the architecture rules in <code>CLAUDE.md</code>, which is why that file sits at the root of the repository; the design decisions, the device testing and the review notes tagged &#8220;lead review&#8221; in the comments are mine.</p>
+
+  <p>The open problems (bots that kill on server time, the claim tolerances, bit-exact replays) are where I&#8217;d most welcome help. If you&#8217;ve shipped victim-side validation in a real game, or tried it and backed out, I&#8217;d like to hear how it went.<span class="endmark" aria-hidden="true"></span></p>
+
+  <footer class="meta">Code: <a href="https://github.com/vitaliiermolaev/fairtick">github.com/vitaliiermolaev/fairtick</a> &#183; MIT or Apache-2.0</footer>
+</article>
+</body>
+</html>
