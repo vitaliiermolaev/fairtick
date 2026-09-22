@@ -16,6 +16,7 @@
 // policy's, which is exactly how the two could silently drift. They now come from the shared
 // [`ClaimFairnessConfig`] (config single source of truth, folded into config_hash). (review #3)
 use crate::config_shared::ClaimFairnessConfig;
+use crate::game::timeline::RenderTick;
 
 /// Substantive inputs gathered from the victim's + enemy's reconstructed history frames.
 pub struct EnemyDeathClaimRules {
@@ -51,8 +52,8 @@ impl EnemyDeathClaimPolicy {
     pub fn shape(
         cfg: &ClaimFairnessConfig,
         visual_distance: f32,
-        victim_render_tick: f64,
-        enemy_render_tick: f64,
+        victim_render_tick: RenderTick,
+        enemy_render_tick: RenderTick,
         max_render_skew_ticks: f64,
     ) -> Result<(), &'static str> {
         if !visual_distance.is_finite() || !victim_render_tick.is_finite() || !enemy_render_tick.is_finite() {
@@ -66,7 +67,7 @@ impl EnemyDeathClaimPolicy {
         if victim_render_tick < enemy_render_tick {
             return Err("victim_behind_enemy");
         }
-        if victim_render_tick - enemy_render_tick > max_render_skew_ticks {
+        if victim_render_tick.ticks_after(enemy_render_tick) > max_render_skew_ticks {
             return Err("skew_too_large");
         }
         Ok(())
@@ -149,9 +150,12 @@ mod tests {
     fn shape_accepts_visible_overlap_with_forward_skew() {
         let cfg = ClaimFairnessConfig::sample();
         // Accepts right up to the caller's max skew (here 44 = e.g. lead 36 + interp 8).
-        assert_eq!(EnemyDeathClaimPolicy::shape(&cfg, 15.0, 1000.0, 992.0, 44.0), Ok(()));
         assert_eq!(
-            EnemyDeathClaimPolicy::shape(&cfg, 15.0, 1000.0, 956.0, 44.0),
+            EnemyDeathClaimPolicy::shape(&cfg, 15.0, RenderTick::new(1000.0), RenderTick::new(992.0), 44.0),
+            Ok(())
+        );
+        assert_eq!(
+            EnemyDeathClaimPolicy::shape(&cfg, 15.0, RenderTick::new(1000.0), RenderTick::new(956.0), 44.0),
             Ok(()),
             "skew == max accepts"
         );
@@ -160,11 +164,29 @@ mod tests {
     #[test]
     fn shape_rejects_non_overlap_and_bad_geometry() {
         let cfg = ClaimFairnessConfig::sample();
-        assert_eq!(EnemyDeathClaimPolicy::shape(&cfg, 20.0, 1000.0, 992.0, 44.0), Err("visual_too_far"));
-        assert_eq!(EnemyDeathClaimPolicy::shape(&cfg, 5.0, 990.0, 992.0, 44.0), Err("victim_behind_enemy"));
+        assert_eq!(
+            EnemyDeathClaimPolicy::shape(&cfg, 20.0, RenderTick::new(1000.0), RenderTick::new(992.0), 44.0),
+            Err("visual_too_far")
+        );
+        assert_eq!(
+            EnemyDeathClaimPolicy::shape(&cfg, 5.0, RenderTick::new(990.0), RenderTick::new(992.0), 44.0),
+            Err("victim_behind_enemy")
+        );
         // Skew beyond the caller's max → rejected (here 49 > 44).
-        assert_eq!(EnemyDeathClaimPolicy::shape(&cfg, 5.0, 1041.0, 992.0, 44.0), Err("skew_too_large"));
-        assert_eq!(EnemyDeathClaimPolicy::shape(&cfg, f32::NAN, 1000.0, 992.0, 44.0), Err("nan_claim"));
+        assert_eq!(
+            EnemyDeathClaimPolicy::shape(&cfg, 5.0, RenderTick::new(1041.0), RenderTick::new(992.0), 44.0),
+            Err("skew_too_large")
+        );
+        assert_eq!(
+            EnemyDeathClaimPolicy::shape(
+                &cfg,
+                f32::NAN,
+                RenderTick::new(1000.0),
+                RenderTick::new(992.0),
+                44.0
+            ),
+            Err("nan_claim")
+        );
     }
 
     #[test]

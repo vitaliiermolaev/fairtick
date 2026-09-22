@@ -15,18 +15,19 @@
 //! across respawns: a kill recorded against life N must never reject a claim made by the respawned
 //! life N+1. (Extracted from the Room god-class — review #1.)
 
+use crate::game::timeline::RenderTick;
 use std::collections::HashMap;
 
 #[derive(Default, Debug)]
 pub(crate) struct ClaimEffects {
     /// (enemy_id, generation) → earliest render tick at which an applied EAT claim consumed it.
-    consumed_enemies: HashMap<(String, u32), f64>,
+    consumed_enemies: HashMap<(String, u32), RenderTick>,
     /// (player_id, life_id) → earliest render tick at which an applied claim killed that life.
-    killed_player_lives: HashMap<(String, u32), f64>,
+    killed_player_lives: HashMap<(String, u32), RenderTick>,
 }
 
 impl ClaimEffects {
-    pub(crate) fn consume_enemy(&mut self, enemy_id: &str, generation: u32, tick: f64) {
+    pub(crate) fn consume_enemy(&mut self, enemy_id: &str, generation: u32, tick: RenderTick) {
         self.consumed_enemies
             .entry((enemy_id.to_string(), generation))
             .and_modify(|t| {
@@ -36,7 +37,7 @@ impl ClaimEffects {
             })
             .or_insert(tick);
     }
-    pub(crate) fn kill_player_life(&mut self, player_id: &str, life_id: u32, tick: f64) {
+    pub(crate) fn kill_player_life(&mut self, player_id: &str, life_id: u32, tick: RenderTick) {
         self.killed_player_lives
             .entry((player_id.to_string(), life_id))
             .and_modify(|t| {
@@ -47,18 +48,23 @@ impl ClaimEffects {
             .or_insert(tick);
     }
     /// An EAT claim consumed this enemy life STRICTLY before `before` (so a death by it can't stand).
-    pub(crate) fn enemy_consumed_before(&self, enemy_id: &str, generation: u32, before: f64) -> bool {
+    pub(crate) fn enemy_consumed_before(&self, enemy_id: &str, generation: u32, before: RenderTick) -> bool {
         self.consumed_enemies.get(&(enemy_id.to_string(), generation)).is_some_and(|t| *t < before)
     }
     /// A claim killed THIS life of the player STRICTLY before `before` (so an eat BY that same life
     /// can't stand). A later life (post-respawn `life_id`) has no entry, so its eats are unaffected.
-    pub(crate) fn player_life_killed_before(&self, player_id: &str, life_id: u32, before: f64) -> bool {
+    pub(crate) fn player_life_killed_before(
+        &self,
+        player_id: &str,
+        life_id: u32,
+        before: RenderTick,
+    ) -> bool {
         self.killed_player_lives.get(&(player_id.to_string(), life_id)).is_some_and(|t| *t < before)
     }
     /// Drop entries older than `min_tick`. Safe once an entry's render tick has aged out of the
     /// contact-history ring: no still-acceptable claim can reconstruct that life any more, so the
     /// entry can never bound another claim again. Keeps the ledger bounded over a long match.
-    pub(crate) fn prune(&mut self, min_tick: f64) {
+    pub(crate) fn prune(&mut self, min_tick: RenderTick) {
         self.consumed_enemies.retain(|_, t| *t >= min_tick);
         self.killed_player_lives.retain(|_, t| *t >= min_tick);
     }

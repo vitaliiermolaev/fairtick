@@ -24,6 +24,7 @@
 //! The policy is pure bookkeeping + verdicts: no Room access, no telemetry, no side
 //! effects (CLAUDE.md: policies decide, the room executes, telemetry observes).
 
+use crate::game::timeline::ServerTick;
 use std::collections::HashMap;
 
 /// Tunables. Constructed by the Room from `claim_fairness` (the overlap radius is the
@@ -83,7 +84,7 @@ struct Run {
     victim_id: String,
     victim_life_id: u32,
     ticks: u32,
-    last_tick: u64,
+    last_tick: ServerTick,
     /// Last reject reason already surfaced for this run (dedup for telemetry).
     reported_reject: Option<&'static str>,
 }
@@ -92,7 +93,7 @@ struct Run {
 pub struct FillerEatPolicy {
     rules: FillerEatRules,
     runs: HashMap<String, Run>,
-    cooldown_until: HashMap<String, u64>,
+    cooldown_until: HashMap<String, ServerTick>,
 }
 
 impl FillerEatPolicy {
@@ -108,7 +109,7 @@ impl FillerEatPolicy {
     /// overlapping weaker player this tick) and return the verdict.
     pub fn evaluate(
         &mut self,
-        tick: u64,
+        tick: ServerTick,
         attacker_id: &str,
         candidate: Option<&FillerEatCandidate>,
     ) -> FillerEatVerdict {
@@ -136,7 +137,7 @@ impl FillerEatPolicy {
         });
         if run.victim_id != c.victim_id
             || run.victim_life_id != c.victim_life_id
-            || tick.saturating_sub(run.last_tick) > 1
+            || tick.get().saturating_sub(run.last_tick.get()) > 1
         {
             run.victim_id = c.victim_id.clone();
             run.victim_life_id = c.victim_life_id;
@@ -188,9 +189,10 @@ impl FillerEatPolicy {
     }
 
     /// The Room applied an eat for this attacker: arm its cooldown and clear the run.
-    pub fn note_eat_applied(&mut self, tick: u64, attacker_id: &str) {
+    pub fn note_eat_applied(&mut self, tick: ServerTick, attacker_id: &str) {
         self.runs.remove(attacker_id);
-        self.cooldown_until.insert(attacker_id.to_string(), tick + self.rules.attacker_cooldown_ticks);
+        let until = ServerTick::new(tick.get() + self.rules.attacker_cooldown_ticks);
+        self.cooldown_until.insert(attacker_id.to_string(), until);
     }
 
     /// Drop all bookkeeping that references a removed player (either role).
@@ -237,9 +239,9 @@ mod tests {
         let mut p = FillerEatPolicy::new(rules());
         let c = clean_candidate();
         for t in 1..6 {
-            assert_eq!(p.evaluate(t, "f1", Some(&c)), FillerEatVerdict::NotYet, "tick {t}");
+            assert_eq!(p.evaluate(ServerTick::new(t), "f1", Some(&c)), FillerEatVerdict::NotYet, "tick {t}");
         }
-        assert_eq!(p.evaluate(6, "f1", Some(&c)), FillerEatVerdict::Eat);
+        assert_eq!(p.evaluate(ServerTick::new(6), "f1", Some(&c)), FillerEatVerdict::Eat);
     }
 
     #[test]
@@ -247,13 +249,13 @@ mod tests {
         let mut p = FillerEatPolicy::new(rules());
         let c = clean_candidate();
         for t in 1..6 {
-            p.evaluate(t, "f1", Some(&c));
+            p.evaluate(ServerTick::new(t), "f1", Some(&c));
         }
-        assert_eq!(p.evaluate(7, "f1", None), FillerEatVerdict::NotYet); // contact broke
+        assert_eq!(p.evaluate(ServerTick::new(7), "f1", None), FillerEatVerdict::NotYet); // contact broke
         for t in 8..13 {
-            assert_eq!(p.evaluate(t, "f1", Some(&c)), FillerEatVerdict::NotYet, "tick {t}");
+            assert_eq!(p.evaluate(ServerTick::new(t), "f1", Some(&c)), FillerEatVerdict::NotYet, "tick {t}");
         }
-        assert_eq!(p.evaluate(13, "f1", Some(&c)), FillerEatVerdict::Eat);
+        assert_eq!(p.evaluate(ServerTick::new(13), "f1", Some(&c)), FillerEatVerdict::Eat);
     }
 
     #[test]
@@ -261,10 +263,14 @@ mod tests {
         let mut p = FillerEatPolicy::new(rules());
         let mut c = clean_candidate();
         for t in 1..6 {
-            p.evaluate(t, "f1", Some(&c));
+            p.evaluate(ServerTick::new(t), "f1", Some(&c));
         }
         c.victim_life_id = 1; // the victim died to someone else and respawned in place
-        assert_eq!(p.evaluate(6, "f1", Some(&c)), FillerEatVerdict::NotYet, "run must restart");
+        assert_eq!(
+            p.evaluate(ServerTick::new(6), "f1", Some(&c)),
+            FillerEatVerdict::NotYet,
+            "run must restart"
+        );
     }
 
     #[test]
@@ -272,18 +278,18 @@ mod tests {
         let mut p = FillerEatPolicy::new(rules());
         let c = clean_candidate();
         for t in 1..=6 {
-            p.evaluate(t, "f1", Some(&c));
+            p.evaluate(ServerTick::new(t), "f1", Some(&c));
         }
-        p.note_eat_applied(6, "f1");
+        p.note_eat_applied(ServerTick::new(6), "f1");
         // Overlapping the whole cooldown accumulates NOTHING.
         for t in 7..246 {
-            assert_eq!(p.evaluate(t, "f1", Some(&c)), FillerEatVerdict::NotYet, "tick {t}");
+            assert_eq!(p.evaluate(ServerTick::new(t), "f1", Some(&c)), FillerEatVerdict::NotYet, "tick {t}");
         }
         // Cooldown over (6+240=246): a fresh sustained run is still required.
         for t in 246..251 {
-            assert_eq!(p.evaluate(t, "f1", Some(&c)), FillerEatVerdict::NotYet, "tick {t}");
+            assert_eq!(p.evaluate(ServerTick::new(t), "f1", Some(&c)), FillerEatVerdict::NotYet, "tick {t}");
         }
-        assert_eq!(p.evaluate(251, "f1", Some(&c)), FillerEatVerdict::Eat);
+        assert_eq!(p.evaluate(ServerTick::new(251), "f1", Some(&c)), FillerEatVerdict::Eat);
     }
 
     #[test]
@@ -292,14 +298,17 @@ mod tests {
         let mut c = clean_candidate();
         c.victim_claim_ready = false;
         for t in 1..6 {
-            assert_eq!(p.evaluate(t, "f1", Some(&c)), FillerEatVerdict::NotYet);
+            assert_eq!(p.evaluate(ServerTick::new(t), "f1", Some(&c)), FillerEatVerdict::NotYet);
         }
-        assert_eq!(p.evaluate(6, "f1", Some(&c)), FillerEatVerdict::Reject("victim_not_claim_ready"));
+        assert_eq!(
+            p.evaluate(ServerTick::new(6), "f1", Some(&c)),
+            FillerEatVerdict::Reject("victim_not_claim_ready")
+        );
         // Same persisting block: silent (no telemetry spam).
-        assert_eq!(p.evaluate(7, "f1", Some(&c)), FillerEatVerdict::NotYet);
+        assert_eq!(p.evaluate(ServerTick::new(7), "f1", Some(&c)), FillerEatVerdict::NotYet);
         // Gate clears while the overlap persists: the eat fires without a new run.
         c.victim_claim_ready = true;
-        assert_eq!(p.evaluate(8, "f1", Some(&c)), FillerEatVerdict::Eat);
+        assert_eq!(p.evaluate(ServerTick::new(8), "f1", Some(&c)), FillerEatVerdict::Eat);
     }
 
     #[test]
@@ -310,9 +319,9 @@ mod tests {
         c.victim_claim_ready = false; // fillers never have a client to be "ready"
         c.victim_admission_age_ticks = 0;
         for t in 1..6 {
-            p.evaluate(t, "f1", Some(&c));
+            p.evaluate(ServerTick::new(t), "f1", Some(&c));
         }
-        assert_eq!(p.evaluate(6, "f1", Some(&c)), FillerEatVerdict::Eat);
+        assert_eq!(p.evaluate(ServerTick::new(6), "f1", Some(&c)), FillerEatVerdict::Eat);
     }
 
     type GateCase = (fn(&mut FillerEatCandidate), &'static str);
@@ -331,9 +340,9 @@ mod tests {
             let mut c = clean_candidate();
             mutate(&mut c);
             for t in 1..6 {
-                p.evaluate(t, "f1", Some(&c));
+                p.evaluate(ServerTick::new(t), "f1", Some(&c));
             }
-            assert_eq!(p.evaluate(6, "f1", Some(&c)), FillerEatVerdict::Reject(want));
+            assert_eq!(p.evaluate(ServerTick::new(6), "f1", Some(&c)), FillerEatVerdict::Reject(want));
         }
     }
 }

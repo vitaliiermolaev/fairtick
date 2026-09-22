@@ -17,6 +17,7 @@
 //! validation used, so behavior is unchanged — this is a pure extraction.
 
 use crate::config_shared::ClaimFairnessConfig;
+use crate::game::timeline::{RenderTick, ServerTick};
 use crate::protocol::EatClaim;
 
 /// Per-player cap on buffered (pending) eat claims — a RESOURCE bound (anti-OOM), not a fairness
@@ -49,10 +50,10 @@ pub fn accept_reason(attacker_invincible: bool, attacker_score: u32, target_scor
 /// Inputs for the enemy-eat rules (everything after the Room has sampled the enemy's
 /// history, confirmed the position match, and located the live enemy).
 pub struct EnemyEatRules {
-    /// Tick this enemy's current life started.
-    pub respawned_at: u64,
-    /// `floor(target_render_tick)` — the history frame the claim targets.
-    pub target_floor: u64,
+    /// Server tick this enemy's current life started.
+    pub respawned_at: ServerTick,
+    /// `floor(target_render_tick)`: the history frame (a server tick) the claim targets.
+    pub target_floor: ServerTick,
     pub attacker_invincible: bool,
     pub attacker_score: u32,
     pub enemy_score: u32,
@@ -121,10 +122,13 @@ impl EatClaimPolicy {
         if claim.visual_distance > cfg.visible_overlap_radius_px {
             return Err("visual_distance_too_large");
         }
-        if claim.attacker_render_tick < claim.target_render_tick {
+        // Both ticks are on the attacker's RENDER timeline (the wire carries bare f64s).
+        let attacker = RenderTick::new(claim.attacker_render_tick);
+        let target = RenderTick::new(claim.target_render_tick);
+        if attacker < target {
             return Err("target_tick_after_attacker_tick");
         }
-        if claim.attacker_render_tick - claim.target_render_tick > cfg.max_view_skew_ticks {
+        if attacker.ticks_after(target) > cfg.max_view_skew_ticks {
             return Err("view_skew_too_large");
         }
         Ok(())
@@ -161,7 +165,7 @@ impl EatClaimPolicy {
         if rules.respawned_at > rules.target_floor {
             return Err("enemy_already_respawned");
         }
-        if rules.target_floor <= rules.respawned_at + cfg.enemy_respawn_eat_grace_ticks {
+        if rules.target_floor.get() <= rules.respawned_at.get() + cfg.enemy_respawn_eat_grace_ticks {
             return Err("enemy_respawn_grace");
         }
         if !can_eat(rules.attacker_invincible, rules.attacker_score, rules.enemy_score) {
@@ -277,8 +281,8 @@ mod tests {
 
     fn enemy_rules() -> EnemyEatRules {
         EnemyEatRules {
-            respawned_at: 0,
-            target_floor: 100,
+            respawned_at: ServerTick::new(0),
+            target_floor: ServerTick::new(100),
             attacker_invincible: false,
             attacker_score: 10,
             enemy_score: 5,
@@ -295,11 +299,11 @@ mod tests {
         assert_eq!(EatClaimPolicy::enemy_eat(&cfg, &enemy_rules()), Ok(()));
         // Already respawned past the targeted frame.
         let mut r = enemy_rules();
-        r.respawned_at = 101;
+        r.respawned_at = ServerTick::new(101);
         assert_eq!(EatClaimPolicy::enemy_eat(&cfg, &r), Err("enemy_already_respawned"));
         // Inside the post-respawn grace window.
         let mut r = enemy_rules();
-        r.respawned_at = 98; // target_floor 100 <= 98 + 3
+        r.respawned_at = ServerTick::new(98); // target_floor 100 <= 98 + 3
         assert_eq!(EatClaimPolicy::enemy_eat(&cfg, &r), Err("enemy_respawn_grace"));
         // Too light and not invincible.
         let mut r = enemy_rules();

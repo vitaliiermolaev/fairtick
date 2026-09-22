@@ -1389,7 +1389,7 @@ impl Room {
                 victim_score: v.score,
             });
 
-            match self.filler_eat_policy.evaluate(tick, attacker_id, candidate.as_ref()) {
+            match self.filler_eat_policy.evaluate(ServerTick::new(tick), attacker_id, candidate.as_ref()) {
                 FillerEatVerdict::NotYet => {}
                 FillerEatVerdict::Reject(reason) => {
                     let c = candidate.as_ref().expect("reject implies a candidate");
@@ -1443,8 +1443,14 @@ impl Room {
                     );
                     // Ledger parity with accepted claims: this life is dead — a later
                     // stale human claim against it must reject as kill-by-corpse.
-                    self.claim_ledger.kill_player_life(&victim_id, victim_life, tick as f64);
-                    self.filler_eat_policy.note_eat_applied(tick, attacker_id);
+                    // A filler has no render timeline, so its kill is stamped at the server tick,
+                    // placed explicitly on the render timeline the ledger orders claims by.
+                    self.claim_ledger.kill_player_life(
+                        &victim_id,
+                        victim_life,
+                        ServerTick::new(tick).as_render_tick(),
+                    );
+                    self.filler_eat_policy.note_eat_applied(ServerTick::new(tick), attacker_id);
                 }
             }
         }
@@ -1658,8 +1664,8 @@ impl Room {
                 && EnemyDeathClaimPolicy::shape(
                     cf,
                     c.claim.visual_distance,
-                    c.claim.victim_render_tick,
-                    c.claim.enemy_render_tick,
+                    RenderTick::new(c.claim.victim_render_tick),
+                    RenderTick::new(c.claim.enemy_render_tick),
                     max_skew,
                 )
                 .is_ok()
@@ -2754,7 +2760,8 @@ impl Room {
         let tick = self.tick;
         self.contact_history.record(&self.players, &self.enemies, tick);
         let retain = self.claim_ledger_retain_ticks();
-        self.claim_ledger.prune(tick as f64 - retain);
+        // The ledger is keyed by render ticks; the retention window is measured back from now.
+        self.claim_ledger.prune(ServerTick::new(tick).as_render_tick().earlier_by(retain));
     }
 
     /// Drain the claim channel, hold claims whose attacker tick is still ahead of
@@ -2930,8 +2937,8 @@ impl Room {
         if let Err(reason) = EnemyDeathClaimPolicy::shape(
             &cf.claim_fairness,
             claim.visual_distance,
-            claim.victim_render_tick,
-            claim.enemy_render_tick,
+            RenderTick::new(claim.victim_render_tick),
+            RenderTick::new(claim.enemy_render_tick),
             self.death_claim_max_skew_ticks(),
         ) {
             self.reject_enemy_death_claim(&victim_id, claim.claim_id, reason);
@@ -2964,7 +2971,11 @@ impl Room {
         // existed to kill the victim later — reject rather than let a since-eaten bot kill via its
         // still-present (immutable) history frame. Strict `<`, so a same-tick eat+death mutually stand
         // (each player saw their own outcome).
-        if effects.enemy_consumed_before(&claim.enemy_id, claim.enemy_generation, claim.victim_render_tick) {
+        if effects.enemy_consumed_before(
+            &claim.enemy_id,
+            claim.enemy_generation,
+            RenderTick::new(claim.victim_render_tick),
+        ) {
             self.reject_enemy_death_claim(
                 &victim_id,
                 claim.claim_id,
@@ -3121,7 +3132,7 @@ impl Room {
         // Ledger (round-3 #1): the victim's THIS-life died at its render tick — a later eat by the
         // same life is now rejected as a kill-by-corpse, but the respawned life (new life_id) is
         // unaffected. The tick is victim_render_tick, the key the death resolver sorts on (#5).
-        effects.kill_player_life(&victim_id, victim_hist.life_id, claim.victim_render_tick);
+        effects.kill_player_life(&victim_id, victim_hist.life_id, RenderTick::new(claim.victim_render_tick));
     }
 
     fn reject_enemy_death_claim(&mut self, player_id: &str, claim_id: u32, reason: &str) {
@@ -3312,8 +3323,11 @@ impl Room {
         // rather than reconstruct a kill by a corpse. Keyed on the life the attacker was at its render
         // tick, so a respawned life's eats are unaffected. Checked here (not pre-dedup) because the
         // life_id comes from the gathered history frame.
-        if effects.player_life_killed_before(&attacker_id, attacker_hist.life_id, claim.attacker_render_tick)
-        {
+        if effects.player_life_killed_before(
+            &attacker_id,
+            attacker_hist.life_id,
+            RenderTick::new(claim.attacker_render_tick),
+        ) {
             self.reject_eat_claim(&attacker_id, claim.claim_id, "attacker_dead_by_earlier_claim");
             return;
         }
@@ -3370,7 +3384,7 @@ impl Room {
         if let Err(reason) = EatClaimPolicy::enemy_eat(
             &cf.claim_fairness,
             &EnemyEatRules {
-                respawned_at,
+                respawned_at: ServerTick::new(respawned_at),
                 target_floor: RenderTick::new(claim.target_render_tick).floor_tick(),
                 attacker_invincible: attacker_hist.is_invincible,
                 attacker_score: attacker_hist.score,
@@ -3432,7 +3446,11 @@ impl Room {
         // (target_hist), which matches a death claim's enemy_generation. The tick is the EAT's
         // resolver key — attacker_render_tick (#5) — so the causal ordering matches the sort order
         // (eat claims are scheduled/sorted by attacker_render_tick, not target_render_tick).
-        effects.consume_enemy(&claim.target_id, target_hist.generation, claim.attacker_render_tick);
+        effects.consume_enemy(
+            &claim.target_id,
+            target_hist.generation,
+            RenderTick::new(claim.attacker_render_tick),
+        );
     }
 
     fn try_apply_player_eat_claim(
@@ -3557,7 +3575,11 @@ impl Room {
         // rejected as a kill-by-corpse (the respawned life is unaffected). The tick is the eat's
         // resolver key, attacker_render_tick (#5), to match the sort order; victim_hist.life_id
         // identifies which life was eaten.
-        effects.kill_player_life(&victim_id, victim_hist.life_id, claim.attacker_render_tick);
+        effects.kill_player_life(
+            &victim_id,
+            victim_hist.life_id,
+            RenderTick::new(claim.attacker_render_tick),
+        );
     }
 
     fn handle_player_eaten_by_claim(

@@ -197,8 +197,8 @@ fn policy_scenarios_match_fixture() {
                 let got = check_result(EatClaimPolicy::enemy_eat(
                     &cf,
                     &EnemyEatRules {
-                        respawned_at: *respawned_at,
-                        target_floor: *target_floor,
+                        respawned_at: ServerTick::new(*respawned_at),
+                        target_floor: ServerTick::new(*target_floor),
                         attacker_invincible: *attacker_invincible,
                         attacker_score: *attacker_score,
                         enemy_score: *enemy_score,
