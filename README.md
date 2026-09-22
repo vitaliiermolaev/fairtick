@@ -8,6 +8,9 @@ players on a single 1 vCPU / 2 GB box** at p99 tick latency **≤ 12 ms**.
 Free and open source under **MIT or Apache-2.0** — use it for anything, commercial
 included. If it saves you time, [support the work](#support).
 
+**Write-up:** [The enemy on your screen is 133 milliseconds old](https://vitaliiermolaev.github.io/fairtick/)
+explains the design, the numbers, and what is still unsolved.
+
 It ships with a playable reference game — a top-down maze arena (move, collect,
 eat, respawn, boost) with PvE enemies and server-driven filler bots. The interesting
 part is not the game — it is the netcode: getting *visual fairness* right on real
