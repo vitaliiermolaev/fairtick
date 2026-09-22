@@ -17,12 +17,13 @@ networks.
 
 ## Why this exists
 
-Every real-time multiplayer team faces one fork: **rent** per-CCU capacity from
-Photon / Colyseus Cloud / Hathora and watch margins erode with scale, or **build**
-authoritative netcode in-house — a 6–12 engineer-month detour. And the socket is
-the easy half. The hard half is **fairness**: validating a kill against what the
-player actually *saw* on their screen, not what the server's clock said a frame
-later. This project has that already solved, measured, and reproducible.
+Most of a real-time multiplayer backend is plumbing. The hard part is **fairness**:
+deciding a kill against what the player actually *saw* on screen, not what the
+server's clock said a moment later. A client draws other entities from interpolated
+snapshots, behind the server, while its own avatar is predicted ahead of it, so a
+collision that is real on the server can be a visible miss on the phone. fairtick
+makes that explicit: every decision that depends on what a player saw names the
+timeline it uses, and the numbers behind it are measured and reproducible.
 
 > **The core principle:** if a gameplay decision depends on what a player saw, the
 > code explicitly names and uses the player-visible timeline — it never silently
@@ -96,15 +97,18 @@ Layered, with a hard boundary between deterministic gameplay and everything else
 Network code may call gameplay code; **gameplay code knows nothing about
 transport, JSON, sockets, the DB, or logging.**
 
-- **Functional core** (`src/game`) — a single-writer **Room actor** advances one
-  deterministic tick per update and emits domain **events** + **snapshot
-  projections**. Pure movement (`sim.rs`) is mirrored byte-for-byte by the client
-  so prediction matches. All randomness routes through a seeded per-room RNG, so a
-  fixed seed reproduces a replay. A build-time guard bans wall-clock time inside
-  the gameplay module — decisions use **typed timeline** newtypes
-  (`ServerTick` / `RenderTick` / `UnixMs`) the compiler won't let you mix.
-- **Fairness policies** (`src/game/policies`) — small, pure, stateless decision
-  functions extracted from the room: eat-claim validation, enemy-contact death,
+- **Functional core** (`src/game`) — each **Room** sits behind one lock and advances
+  one tick per update; inputs and claims arrive through queues that only the tick
+  drains, so room state changes one step at a time. The room emits domain
+  **events** + **snapshot projections**. Pure movement (`sim.rs`) is mirrored
+  byte-for-byte by the client so prediction matches. Gameplay randomness routes
+  through a seeded per-room RNG (entity ids are still random UUIDs, so replays are
+  not yet bit-exact). A test rejects any wall-clock read in `src/game/**`, and every
+  policy entry point takes **typed timeline** newtypes (`ServerTick` / `RenderTick`)
+  the compiler won't let you mix; the wire carries plain numbers, wrapped at the
+  boundary.
+- **Fairness policies** (`src/game/policies`) — small decision modules with no I/O
+  (no sockets, DB, or logging), extracted from the room: eat-claim validation, enemy-contact death,
   the timeline-explicit enemy-death-candidate model, and the filler-eat stand-in.
   Claims are validated by **reconstructing what the client could plausibly see**
   at the relevant render tick, against a bounded, generation-aware contact history.
@@ -125,11 +129,11 @@ transport, JSON, sockets, the DB, or logging.**
 ### `src/game` — functional-core gameplay
 | Module | Purpose |
 |---|---|
-| `room.rs` | The Room actor and the whole tick loop: drains commands, applies buffered inputs at their target tick, drives fillers, moves entities, records contact history, resolves eat/death claims chronologically, broadcasts snapshots, ends the match. |
+| `room.rs` | The Room and the whole tick loop: drains commands, applies buffered inputs at their target tick, drives fillers, moves entities, records contact history, resolves eat/death claims chronologically, broadcasts snapshots, ends the match. |
 | `room_manager.rs` | Imperative shell: spawns the tick task (all rooms per tick, panic evicts the room), matchmaking with under-lock capacity checks, resume-token registry + grace sweep, reward persistence via the DB outbox. |
 | `sim.rs` | Pure movement step `(state, map, config) → next state`; mirrored byte-for-byte by the Unity client. |
 | `timeline.rs` | Typed `ServerTick` / `RenderTick` / `UnixMs` newtypes so the compiler rejects mixing timelines. |
-| `rng.rs` | Deterministic per-room ChaCha8 RNG — fixed seed reproduces a replay. |
+| `rng.rs` | Seeded per-room ChaCha8 RNG for all gameplay randomness. |
 | `map.rs` | Maze grid, safe zones, portals, grid↔world conversion, spawn positions. |
 | `player.rs` | Player entity + `ActorKind{Human,FillerBot}`: score, boost/invincibility/spawn-protection timers, life id, intent buffer, resume + claim-readiness flags. |
 | `ai.rs` | The PvE enemy mob (distinct from filler bots): maze movement, nearest-alive targeting, respawn. |
@@ -177,7 +181,7 @@ transport, JSON, sockets, the DB, or logging.**
 
 `cargo test --locked` runs three integration suites plus the in-module unit tests:
 
-- **`tests/policy_scenarios.rs`** — replays 24 named given/when/then cases
+- **`tests/policy_scenarios.rs`** — replays 25 named given/when/then cases
   (unfair death, fair death, eat-claim accepted/rejected, stale claim) against the
   pure policies; asserts the decision *and* the exact reject-reason string. Claim
   tolerances load from the shipped config, not hardcoded literals.
