@@ -2797,7 +2797,7 @@ impl Room {
 
         // Eat: schedule by attacker_render_tick.
         let mut keep_eat = Vec::new();
-        for input in self.pending_eat_claims.drain(..).collect::<Vec<_>>() {
+        for input in std::mem::take(&mut self.pending_eat_claims) {
             let tick_f = input.claim.attacker_render_tick;
             // ceil, NOT floor — the sampler needs the upper frame recorded (see required_history_tick).
             let Some(required_tick) = required_history_tick(tick_f) else {
@@ -2826,7 +2826,7 @@ impl Room {
         // Death: schedule by victim_render_tick (same rules).
         let mut keep_death = Vec::new();
         let death_max_future = self.death_claim_max_future_ticks();
-        for input in self.pending_enemy_death_claims.drain(..).collect::<Vec<_>>() {
+        for input in std::mem::take(&mut self.pending_enemy_death_claims) {
             let tick_f = input.claim.victim_render_tick;
             // ceil(victim_render_tick): the victim is the LATER of the two render ticks (shape requires
             // victim >= enemy), so once the victim's ceil frame exists the enemy's does too — gating on
